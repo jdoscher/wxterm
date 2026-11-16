@@ -1,0 +1,23 @@
+# Shared settings loader for the kiosk scripts: source kiosk/kiosk.conf if present, then fill in defaults.
+# shellcheck shell=bash
+_wx_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091
+[[ -f "$_wx_root/kiosk/kiosk.conf" ]] && . "$_wx_root/kiosk/kiosk.conf"
+WXTERM_DIR="${WXTERM_DIR:-/opt/wxterm}"
+STATE_DIR="${STATE_DIR:-/var/lib/wxterm}"
+KIOSK_USER="${KIOSK_USER:-wxterm}"
+DEPLOY_USER="${DEPLOY_USER:-}"
+ADMIN_USERS="${ADMIN_USERS:-}"
+NWS_CONTACT="${NWS_CONTACT:-}"
+START_LOCATION="${START_LOCATION:-home}"
+THEME="${THEME:-amber}"
+BIGFONT="${BIGFONT:-segment}"
+SHUFFLE_MIN="${SHUFFLE_MIN:-15}"
+GIF_FPS="${GIF_FPS:-10}"
+FONT="${FONT:-DejaVu Sans Mono}"
+FONT_SIZE="${FONT_SIZE:-13}"
+KIOSK_MODE="${KIOSK_MODE:-yes}"
+MCP="${MCP:-no}"
+MCP_PORT="${MCP_PORT:-8090}"
+MCP_BIND="${MCP_BIND:-0.0.0.0}"
+MCP_TOKEN="${MCP_TOKEN:-}"

@@ -1,0 +1,13 @@
+# Locations in toggle order (`l` key): name and the host port of its collector.
+# A location is used only if locations/<name>.env exists. `home` is yours and gitignored; make it with
+# scripts/new-location.py. After editing this file run scripts/gen-compose.py (new-location.py does both).
+home 8091
+sf 8093
+la 8100
+seattle 8098
+chicago 8099
+nyc 8092
+london 8094
+paris 8095
+oslo 8096
+tokyo 8097

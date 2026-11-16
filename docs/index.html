@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wxterm: weather, drawn in text</title>
+<meta name="description" content="A vintage full-screen terminal weather display: live radar loop, conditions, tides, moon and forecast, drawn in ASCII and braille. Free data, no API keys, MIT licensed.">
+<meta property="og:title" content="wxterm: weather, drawn in text">
+<meta property="og:description" content="A vintage full-screen terminal weather display. Radar, tides, moon and forecast in ASCII and braille. Free data, no keys.">
+<meta property="og:image" content="https://wxterm.app/og.png">
+<meta property="og:url" content="https://wxterm.app/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0b0700">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230b0700'/%3E%3Ctext x='2' y='13' font-family='monospace' font-size='13' fill='%23ffb000'%3E%E2%96%8C%3C/text%3E%3C/svg%3E">
+<style>
+  /* Palettes are the display's own themes (display/wxterm/themes.py). The c key cycles them, as on the kiosk. */
+  :root, [data-theme="amber"] { --bg:#0b0700; --fg:#ffb000; --dim:#8a5a00; --faint:#4a3000; --bright:#ffd98a; --accent:#ffc640; }
+  [data-theme="green"] { --bg:#020b03; --fg:#33ff66; --dim:#1d8a3a; --faint:#0e4a1e; --bright:#c2ffd2; --accent:#7dff9e; }
+  [data-theme="white"] { --bg:#0c0c0f; --fg:#d6d6cf; --dim:#74746e; --faint:#3a3a37; --bright:#ffffff; --accent:#ffffff; }
+  [data-theme="ibm"]   { --bg:#0000a8; --fg:#aaaaaa; --dim:#7777ff; --faint:#3a3ad8; --bright:#ffffff; --accent:#ffff55; }
+  [data-theme="color"] { --bg:#0b0c10; --fg:#c9c9c4; --dim:#6d6f76; --faint:#303238; --bright:#ffffff; --accent:#5fd7ff; }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.6 "DejaVu Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    transition: background-color .25s, color .25s;
+  }
+  a { color: var(--bright); text-decoration-color: var(--dim); text-underline-offset: 3px; }
+  a:hover { color: var(--accent); text-decoration-color: currentColor; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  ::selection { background: var(--fg); color: var(--bg); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+
+  /* status bar, like the bottom row of the display */
+  .bar { border-bottom: 1px solid var(--faint); font-size: 13px; letter-spacing: .04em; }
+  .bar .wrap { display: flex; gap: 22px; align-items: center; height: 44px; }
+  .bar b { color: var(--bright); font-weight: 700; }
+  .bar nav { margin-left: auto; display: flex; gap: 18px; }
+  .bar nav a { color: var(--dim); text-decoration: none; text-transform: uppercase; }
+  .bar nav a:hover { color: var(--bright); }
+  .dot { color: var(--dim); }
+
+  h1, h2, h3 { font-weight: 700; color: var(--bright); margin: 0; }
+  h1 { font-size: clamp(30px, 4.6vw, 52px); line-height: 1.1; letter-spacing: -.01em; text-wrap: balance; }
+  h2 { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin-bottom: 18px; }
+  p { margin: 0 0 14px; text-wrap: pretty; }
+  .lede { font-size: 17px; max-width: 62ch; color: var(--fg); margin-top: 18px; }
+
+  .hero { padding: 64px 0 28px; display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: end; }
+  .hero-actions { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 18px;
+    border: 1px solid var(--fg); color: var(--bg); background: var(--fg); font: inherit; font-weight: 700;
+    text-decoration: none; cursor: pointer; letter-spacing: .04em;
+  }
+  .btn:hover { background: var(--bright); border-color: var(--bright); color: var(--bg); }
+  .btn.ghost { background: transparent; color: var(--fg); border-color: var(--dim); }
+  .btn.ghost:hover { color: var(--bright); border-color: var(--bright); background: transparent; }
+  kbd { border: 1px solid var(--dim); padding: 0 5px; font: inherit; font-size: 12px; color: var(--bright); }
+
+  /* the screen: a box-drawing frame with its title in the border, like every panel on the display */
+  .screen { position: relative; border: 1px solid var(--dim); padding: 6px; margin: 8px 0 18px; }
+  .screen .t, .panel .t {
+    position: absolute; top: -10px; left: 14px; background: var(--bg); padding: 0 8px;
+    font-size: 12px; letter-spacing: .1em; color: var(--bright); text-transform: uppercase; line-height: 18px;
+  }
+  .screen .t2 { left: auto; right: 14px; color: var(--dim); }
+  .screen img { display: block; width: 100%; height: auto; aspect-ratio: 16/9; background: #000; image-rendering: auto; }
+  .caption { font-size: 13px; color: var(--dim); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .caption button { background: none; border: 0; color: var(--dim); font: inherit; cursor: pointer; padding: 6px 0; min-height: 32px; }
+  .caption button[aria-pressed="true"] { color: var(--bright); text-decoration: underline; text-underline-offset: 4px; }
+  .caption button:hover { color: var(--bright); }
+
+  section { padding: 54px 0 10px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 56px; }
+  .panel { position: relative; border: 1px solid var(--faint); padding: 26px 24px 18px; margin-top: 10px; }
+
+  /* what's on screen: label column + description, like the display's text panels */
+  dl.spec { display: grid; grid-template-columns: max-content 1fr; gap: 10px 22px; margin: 0; }
+  dl.spec dt { color: var(--bright); text-transform: uppercase; letter-spacing: .06em; font-size: 13px; padding-top: 2px; }
+  dl.spec dd { margin: 0; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 7px 14px 7px 0; border-bottom: 1px solid var(--faint); vertical-align: top; }
+  th { color: var(--dim); font-weight: 400; text-transform: uppercase; letter-spacing: .08em; font-size: 12px; }
+  td:first-child { color: var(--bright); white-space: nowrap; }
+
+  pre {
+    margin: 0 0 16px; padding: 16px 18px; overflow-x: auto; border: 1px solid var(--faint);
+    background: color-mix(in srgb, var(--bg) 82%, var(--fg) 4%); font: inherit; font-size: 14px; line-height: 1.7;
+  }
+  pre .c { color: var(--dim); }
+  pre .p { color: var(--dim); user-select: none; }
+  .copy { float: right; margin: -6px -8px 0 12px; background: none; border: 1px solid var(--faint); color: var(--dim);
+          font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; min-height: 28px; }
+  .copy:hover { color: var(--bright); border-color: var(--dim); }
+
+  .chat p { margin: 0 0 10px; }
+  .chat .q { color: var(--bright); }
+  .chat .q::before { content: "> "; color: var(--dim); }
+  .chat .a { color: var(--fg); padding-left: 2ch; }
+  .chat .tool { color: var(--dim); font-size: 13px; padding-left: 2ch; }
+
+  .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 26px 22px; }
+  .gallery figure { margin: 0; }
+  .gallery figcaption { font-size: 13px; color: var(--dim); margin-top: 6px; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 16/9; display: block; border: 1px solid var(--faint); background: #000; }
+
+  footer { margin-top: 70px; border-top: 1px solid var(--faint); padding: 22px 0 40px; font-size: 13px; color: var(--dim); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 26px; }
+  footer a { color: var(--dim); }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; padding-top: 40px; }
+    .cols { grid-template-columns: 1fr; }
+    .gallery { grid-template-columns: 1fr; }
+    .bar nav { display: none; }
+    .screen .t2 { display: none; }
+    dl.spec { grid-template-columns: 1fr; gap: 2px; }
+    dl.spec dd { margin-bottom: 10px; }
+  }
+  @media (prefers-reduced-motion: reduce) { body { transition: none; } }
+</style>
+</head>
+<body data-theme="amber">
+
+<div class="bar"><div class="wrap">
+  <b>WXTERM</b><span class="dot">v1.0</span>
+  <span class="dot" id="themeName">AMBER</span>
+  <nav aria-label="Sections">
+    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#kiosk">Kiosk</a><a href="#mcp">MCP</a><a href="#data">Data</a>
+    <a href="https://github.com/jdoscher/wxterm">GitHub</a>
+  </nav>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div>
+      <h1>Weather, drawn in text.</h1>
+      <p class="lede">wxterm is a full-screen terminal weather display: a live radar loop over a line-drawn map,
+        conditions, a 48-hour graph, tides, the moon and the forecast, in ASCII, box-drawing and braille.
+        It runs on an old laptop as a kiosk with no desktop, or in any big terminal window.</p>
+    </div>
+    <div class="hero-actions">
+      <a class="btn" href="https://github.com/jdoscher/wxterm">GitHub&nbsp;→</a>
+      <a class="btn ghost" href="#install">Install</a>
+    </div>
+  </header>
+
+  <div class="screen" id="screen">
+    <span class="t" id="screenTitle">Radar · San Francisco</span>
+    <span class="t t2">1920×1080 · one radar loop</span>
+    <img id="hero" src="gifs/wxterm-sf-amber.gif" width="1920" height="1080"
+         alt="wxterm in the amber theme showing San Francisco: radar loop over a coastline map, current conditions, a 48-hour temperature graph, tides and the forecast">
+  </div>
+  <div class="caption" role="group" aria-label="Theme">
+    <span>Five phosphor themes. Press <kbd>c</kbd> to cycle, like on the display:</span>
+    <button data-t="amber" aria-pressed="true">amber</button>
+    <button data-t="green" aria-pressed="false">green</button>
+    <button data-t="white" aria-pressed="false">white</button>
+    <button data-t="ibm" aria-pressed="false">ibm blue</button>
+    <button data-t="color" aria-pressed="false">colour</button>
+  </div>
+
+  <section>
+    <div class="cols">
+      <div>
+        <h2>What's on the screen</h2>
+        <dl class="spec">
+          <dt>Radar</dt><dd>The last two hours of radar, looping over coastlines, borders, highways and towns, with 25 and 50 mile rings.</dd>
+          <dt>Now</dt><dd>Temperature in seven-segment digits, feels-like, wind, humidity, pressure trend, and any alerts.</dd>
+          <dt>48 hours</dt><dd>Temperature and dew point as braille line plots over rain-chance bars.</dd>
+          <dt>Tide · moon</dt><dd>The tide curve through tomorrow with every high and low, plus the moon phase, rise and set.</dd>
+          <dt>5-day</dt><dd>Highs, lows, rain chance and a few words for each day.</dd>
+          <dt>Rotating</dt><dd>A panel that cycles between the forecaster's discussion, typed out like a teletype, the surf, and temperatures from the coast inland.</dd>
+        </dl>
+      </div>
+      <div>
+        <h2>Small touches</h2>
+        <dl class="spec">
+          <dt><kbd>l</kbd></dt><dd>Next location. Ten are built in: yours plus nine demo cities from San Francisco to Tokyo.</dd>
+          <dt><kbd>g</kbd></dt><dd>Record exactly one radar loop as a GIF. Every GIF on this page was made that way.</dd>
+          <dt><kbd>f</kbd></dt><dd>Big digits as segments, braille dots or blocks.</dd>
+          <dt><kbd>s</kbd></dt><dd>Shuffle the layout. It also happens every 15 minutes, so nothing burns in.</dd>
+          <dt>Any size</dt><dd>Built for 240×62 cells at 1080p. The layout follows the terminal down to about 160×45.</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <div class="cols">
+      <div>
+        <p>On any Linux or macOS machine with Docker and Python 3.11 or newer:</p>
+<pre><button class="copy" type="button">copy</button><code><span class="p">$ </span>git clone https://github.com/jdoscher/wxterm && cd wxterm
+<span class="p">$ </span>python3 scripts/new-location.py home 47.6062 -122.3321 --title "SEATTLE"
+<span class="p">$ </span>python3 scripts/gen-compose.py
+<span class="p">$ </span>cp .env.example .env      <span class="c"># your contact for the NWS API</span>
+<span class="p">$ </span>docker compose up -d --build
+<span class="p">$ </span>cd display && python3 -m venv .venv && .venv/bin/pip install -e .
+<span class="p">$ </span>.venv/bin/wxterm</code></pre>
+      </div>
+      <div>
+        <p><code>new-location.py</code> takes a name and coordinates and looks up the rest: timezone, weather
+          station (NWS in the US, the nearest airport elsewhere), tide and water-temperature stations,
+          surf spot, map lines and town labels. Your home location is gitignored.</p>
+        <p>Outside the US you get airport observations and the Open-Meteo forecast. Alerts and the
+          forecast discussion are NWS products, so those panels are skipped.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="kiosk">
+    <h2>A kiosk, not a window</h2>
+    <div class="cols">
+      <div>
+        <p>wxterm was built for an old ThinkPad that does nothing else. One script turns a Debian or Ubuntu
+          machine into a weather terminal: it boots straight to the display, with no login screen and no
+          desktop, and ignores the lid and sleep.</p>
+<pre><button class="copy" type="button">copy</button><code><span class="p">$ </span>cp kiosk/kiosk.conf.example kiosk/kiosk.conf
+<span class="p">$ </span>python3 scripts/new-location.py home LAT LON --title "YOUR TOWN"
+<span class="p">$ </span>sudo bash kiosk/setup.sh && sudo reboot</code></pre>
+      </div>
+      <div>
+        <p>Under the hood it's <a href="https://github.com/cage-kiosk/cage">cage</a> running
+          <a href="https://codeberg.org/dnkl/foot">foot</a> fullscreen. The bare Linux console can't
+          show braille, so wxterm skips it. One config file covers every setting, and
+          <code>mode.sh desktop</code> gives you the normal desktop back.</p>
+        <p>The data side runs in Docker, one small collector per location, so switching cities is instant.
+          The display itself is Python with <a href="https://textual.textualize.io">Textual</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="mcp">
+    <h2>Ask your LLM</h2>
+    <div class="cols">
+      <div>
+        <p>An optional, read-only <a href="https://modelcontextprotocol.io">MCP</a> server lets Claude or any
+          MCP client read the weather and the kiosk's status, and take a screenshot. It can't change anything.
+          It's off by default, requires a token, and refuses requests from browsers.</p>
+<pre><button class="copy" type="button">copy</button><code><span class="p">$ </span>claude mcp add --transport http wxterm \
+    http://KIOSK:8090/mcp --header "Authorization: Bearer TOKEN"</code></pre>
+      </div>
+      <div class="panel chat">
+        <span class="t">From the kiosk, 16 Nov 2026</span>
+        <p class="q">Is it raining in San Francisco?</p>
+        <p class="tool">get_radar_summary(location="sf")</p>
+        <p class="a">Yes: heavy rain over the city right now, drifting west-southwest at about 12 mph.</p>
+        <p class="q">Is the kiosk running hot?</p>
+        <p class="tool">get_status</p>
+        <p class="a">No. The CPU is at 42 °C, both batteries are full on AC power, and all ten collectors are up to date.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="data">
+    <h2>Free data, no keys</h2>
+    <table>
+      <thead><tr><th>What</th><th>Source</th></tr></thead>
+      <tbody>
+        <tr><td>Conditions</td><td><a href="https://www.weather.gov/documentation/services-web-api">NWS</a> stations in the US, <a href="https://aviationweather.gov/data/api/">aviationweather.gov</a> METARs elsewhere</td></tr>
+        <tr><td>Forecast</td><td>NWS, and <a href="https://open-meteo.com">Open-Meteo</a> for hourly data and places outside the US</td></tr>
+        <tr><td>Radar</td><td><a href="https://www.rainviewer.com/api.html">RainViewer</a> composite, with IEM NEXRAD as a US fallback</td></tr>
+        <tr><td>Tides</td><td><a href="https://tidesandcurrents.noaa.gov/api/">NOAA CO-OPS</a>, or Open-Meteo's sea-level model where there's no gauge</td></tr>
+        <tr><td>Surf</td><td>Open-Meteo marine</td></tr>
+        <tr><td>Sun · moon</td><td>Computed locally</td></tr>
+        <tr><td>Maps</td><td><a href="https://www.naturalearthdata.com">Natural Earth</a> (public domain) and <a href="https://www.geonames.org">GeoNames</a> town names</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Around the world</h2>
+    <div class="gallery">
+      <figure><img loading="lazy" src="gifs/wxterm-london-green.gif" width="1920" height="1080" alt="wxterm in green showing heavy rain over London"><figcaption>London · green · heavy rain</figcaption></figure>
+      <figure><img loading="lazy" src="gifs/wxterm-paris-color.gif" width="1920" height="1080" alt="wxterm in colour showing rain across Paris"><figcaption>Paris · colour</figcaption></figure>
+      <figure><img loading="lazy" src="gifs/wxterm-seattle-white.gif" width="1920" height="1080" alt="wxterm in white showing light showers over Seattle"><figcaption>Seattle · white · light showers</figcaption></figure>
+      <figure><img loading="lazy" src="gifs/wxterm-tokyo-ibm.gif" width="1920" height="1080" alt="wxterm in IBM blue showing a dry day in Tokyo"><figcaption>Tokyo · IBM blue · dry</figcaption></figure>
+    </div>
+  </section>
+</main>
+
+<footer><div class="wrap">
+  <span>wxterm 1.0 · MIT license · by Jay Doscher</span>
+  <a href="https://github.com/jdoscher/wxterm">Source on GitHub</a>
+  <a href="https://github.com/jdoscher/wxterm/issues">Issues</a>
+  <span>Weather data © NWS, NOAA, Open-Meteo (CC BY 4.0), RainViewer, aviationweather.gov</span>
+</div></footer>
+
+<script>
+  // Cycle the page through the display's themes: same order and the same c key as the kiosk.
+  const THEMES = [
+    ["amber", "AMBER", "gifs/wxterm-sf-amber.gif", "San Francisco", "#0b0700"],
+    ["green", "GREEN", "gifs/wxterm-london-green.gif", "London", "#020b03"],
+    ["white", "WHITE", "gifs/wxterm-seattle-white.gif", "Seattle", "#0c0c0f"],
+    ["ibm", "IBM", "gifs/wxterm-tokyo-ibm.gif", "Tokyo", "#0000a8"],
+    ["color", "COLOR", "gifs/wxterm-paris-color.gif", "Paris", "#0b0c10"],
+  ];
+  let idx = 0;
+  function setTheme(i) {
+    idx = (i + THEMES.length) % THEMES.length;
+    const [key, name, gif, city, bg] = THEMES[idx];
+    document.body.dataset.theme = key;
+    document.getElementById("themeName").textContent = name;
+    document.getElementById("hero").src = gif;
+    document.getElementById("screenTitle").textContent = "Radar · " + city;
+    document.querySelector('meta[name="theme-color"]').content = bg;
+    document.querySelectorAll(".caption button").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === key));
+  }
+  document.querySelectorAll(".caption button").forEach(b =>
+    b.addEventListener("click", () => setTheme(THEMES.findIndex(t => t[0] === b.dataset.t))));
+  document.addEventListener("keydown", e => {
+    if (e.key === "c" && !e.metaKey && !e.ctrlKey && !e.altKey && !/INPUT|TEXTAREA/.test(e.target.tagName)) setTheme(idx + 1);
+  });
+  document.querySelectorAll(".copy").forEach(btn => btn.addEventListener("click", () => {
+    const text = btn.parentElement.querySelector("code").innerText
+      .split("\n").map(l => l.replace(/^\$ /, "").replace(/\s+# .*$/, "")).join("\n");
+    navigator.clipboard.writeText(text).then(() => { btn.textContent = "copied"; setTimeout(() => btn.textContent = "copy", 1500); });
+  }));
+</script>
+</body>
+</html>

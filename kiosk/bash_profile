@@ -1,0 +1,7 @@
+# ~/.bash_profile for the kiosk user. Template: kiosk/setup.sh fills in @STATE_DIR@ and @WXTERM_DIR@.
+# tty1 boots straight into the weather display; any other tty gets a normal shell.
+if [ "$(tty)" = "/dev/tty1" ]; then
+  set -a; . "@STATE_DIR@/display.env"; set +a
+  umask 002
+  exec cage -s -- foot sh -c 'while :; do "@WXTERM_DIR@/display/.venv/bin/wxterm"; sleep 2; done'
+fi

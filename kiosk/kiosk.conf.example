@@ -1,0 +1,47 @@
+# wxterm kiosk settings. Copy to kiosk/kiosk.conf (gitignored) and edit; kiosk/setup.sh, mode.sh, capture.sh,
+# scripts/deploy.sh and scripts/wxctl.sh all read it. Every value here is optional; the defaults are shown.
+
+# --- Accounts and paths ---------------------------------------------------------------------------------------
+# Where the code lives on the kiosk
+WXTERM_DIR=/opt/wxterm
+# Runtime files: saved theme/location (state.json), GIFs, screenshots, display settings
+STATE_DIR=/var/lib/wxterm
+# Account that autologs into tty1 and runs the display (created if missing, no password)
+KIOSK_USER=wxterm
+# Account that owns WXTERM_DIR and pushes updates with scripts/deploy.sh (default: the user who ran sudo setup.sh)
+DEPLOY_USER=
+# People who manage the kiosk, space-separated: added to the docker and kiosk groups, and given a ~/gifs shortcut
+ADMIN_USERS=
+
+# --- Data ---------------------------------------------------------------------------------------------------
+# The NWS asks every API client to include a contact (email or URL) in its User-Agent
+NWS_CONTACT=
+
+# --- Display ------------------------------------------------------------------------------------------------
+# Location shown at every start; other cities are a manual toggle (l). Names come from locations/order
+START_LOCATION=home
+# First-run theme (amber, green, white, ibm, color) and big-digit style (segment, dots, blocks); keys c and f
+# change them later and the choice is saved
+THEME=amber
+BIGFONT=segment
+# Burn-in guard: shuffle the layout every N minutes (0 = off)
+SHUFFLE_MIN=15
+# GIF frame rate for the g key
+GIF_FPS=10
+# Terminal font; size 13 gives 240x62 cells on a 1920x1080 screen (the layout fits any size)
+FONT="DejaVu Sans Mono"
+FONT_SIZE=13
+
+# --- MCP server (lets an LLM read the weather, the kiosk's status and a screenshot; it can't change anything) ---
+# yes: run it (Docker profile "mcp") on MCP_BIND:MCP_PORT, path /mcp. Connection details: scripts/wxctl.sh mcp
+MCP=no
+MCP_PORT=8090
+# Interface to listen on: 0.0.0.0 = every LAN interface, or one address (e.g. 192.168.1.50), or 127.0.0.1 for SSH
+# tunnels only. Never forward this port from the internet. Docker-published ports bypass ufw/firewalld rules.
+MCP_BIND=0.0.0.0
+# Bearer token clients must send. Blank: setup.sh generates one and keeps it in WXTERM_DIR/.env (mode 600)
+MCP_TOKEN=
+
+# --- Boot ---------------------------------------------------------------------------------------------------
+# yes: setup.sh switches the machine to boot straight into the display (undo with: sudo kiosk/mode.sh desktop)
+KIOSK_MODE=yes

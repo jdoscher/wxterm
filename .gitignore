@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+!.env.example
+data/
+logs/
+*.log
+*.db
+*.db-*
+*token*.json
+*.svg
+
+# your own location (scripts/new-location.py home LAT LON) never goes to git
+/locations/home.*
+# generated on each host
+/docker-compose.yml
+/kiosk/kiosk.conf
+.ruff_cache/

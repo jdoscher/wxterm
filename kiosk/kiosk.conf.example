@@ -24,6 +24,8 @@ START_LOCATION=home
 # change them later and the choice is saved
 THEME=amber
 BIGFONT=segment
+# First-run map: radar (the weather radar loop) or air (live air traffic); key a switches and the choice is saved
+MAP=radar
 # Burn-in guard: shuffle the layout every N minutes (0 = off)
 SHUFFLE_MIN=15
 # GIF frame rate for the g key

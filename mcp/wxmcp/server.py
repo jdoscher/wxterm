@@ -118,8 +118,8 @@ async def get_transect(location: str | None = None) -> dict:
 
 @mcp.tool(annotations=RO)
 async def get_status() -> dict:
-    """Kiosk status: what the display shows (location, theme, layout, uptime), the freshness of every data source
-    per location, and machine stats (CPU, memory, temperatures, battery, disk, saved GIFs)."""
+    """Kiosk status: what the display shows (location, theme, layout, radar or air-traffic map, uptime), the freshness
+    of every data source per location, and machine stats (CPU, memory, temperatures, battery, disk, saved GIFs)."""
     def work():
         st = weather.display_state()
         beat = st.get("time")
@@ -128,6 +128,8 @@ async def get_status() -> dict:
             "location": st.get("location"), "theme": (st.get("theme") or "").lower() or None,
             "digit_style": st.get("bigfont"), "terminal_cells": st.get("cells"), "layout": st.get("layout"),
             "radar_paused": st.get("radar_paused"), "recording_gif": st.get("recording_gif"),
+            "map_view": st.get("map_view") or "radar",
+            "air_traffic": st.get("air") if st.get("map_view") == "air" else None,
             "burn_in_shuffle_min": st.get("shuffle_min"), "data_error": st.get("data_error"),
             "uptime_hours": round((time.time() - st["started"]) / 3600, 1) if st.get("started") else None,
         }

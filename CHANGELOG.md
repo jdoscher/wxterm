@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+**Air traffic map**
+- `a` switches the big map between the radar loop and live air traffic, ported from AsciiFlights: ADS-B aircraft as
+  arrows with braille trails, dead-reckoned between polls, over the location's map with runways, airport codes and
+  range rings, and the latest radar frame dithered underneath (`w`).
+- Data tags with callsign, type, route or registration, altitude, climb/descent and speed, placed on leader lines so
+  they don't overlap; `t` cycles auto, all and off. `+`/`-` change the range (5 to 100 NM), `Tab` selects the next
+  aircraft, a click selects one, and `Esc` clears it.
+- When the panel is wide enough, a traffic list and the selected aircraft's details (operator, route, vertical rate,
+  distance and bearing from home, altitude profile) sit beside the map.
+- Routes that don't fit the aircraft's position or heading are hidden, because route databases go stale.
+- The choice of map, range, tag mode and radar underlay is saved. `MAP=air` in `kiosk.conf` makes it the first-run
+  map, and `scripts/wxctl.sh map air|radar` switches it remotely. The MCP server's `get_status` reports it.
+
+**Collector**
+- `/api/aircraft?dist=NM` (adsb.fi, falling back to adsb.lol; at most one request a second, cached 1.5 s, fetched
+  only while the air traffic map is on screen) and `/api/routes?cs=` (adsbdb, cached 6 hours).
+- `/api/radar` takes `&last=N` to return only the newest frames.
+
+**Locations**
+- Geo files include large and medium airports and their runways from OurAirports (public domain). The demo cities are
+  updated. For an older `home`, run `python3 scripts/make_geo.py --add-airports locations/home.geo.json`.
+
 ## 1.0.0 (2026-11-16)
 
 First public release.

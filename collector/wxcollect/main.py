@@ -1,8 +1,10 @@
 """wxcollect: poll free weather sources on a schedule, cache the last good result, serve JSON on :8091.
 
 GET /api/all            everything except radar, with per-source fetched/ok/error times
-GET /api/radar?w=&h=    radar level grids for a w x h dot map (optional &bbox=lon0,lon1,lat0,lat1)
-GET /api/geo            coastline/border/roads/lakes polylines, town labels, home point
+GET /api/radar?w=&h=    radar level grids for a w x h dot map (optional &bbox=lon0,lon1,lat0,lat1, &last=N frames)
+GET /api/geo            coastline/border/roads/lakes polylines, airports and runways, town labels, home point
+GET /api/aircraft?dist= aircraft within dist NM of home (ADS-B, fetched on demand, cached 1.5 s)
+GET /api/routes?cs=     origin/destination for up to 8 comma-separated airline callsigns
 GET /healthz
 """
 from __future__ import annotations
@@ -19,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import config, sources, world
+from . import config, flights, sources, world
 from .radar import Radar, bbox_for
 
 log = logging.getLogger("wxcollect")
@@ -166,7 +168,14 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/radar":
                 w, h = int(q.get("w", 240)), int(q.get("h", 152))
                 bbox = [float(x) for x in q["bbox"].split(",")] if "bbox" in q else bbox_for(w, h)
-                return self._send(RADAR.grid(w, h, bbox))
+                return self._send(RADAR.grid(w, h, bbox, last=int(q.get("last", 0))))
+            if u.path == "/api/aircraft":
+                try:
+                    return self._send(flights.aircraft(int(float(q.get("dist", 40)))))
+                except RuntimeError as e:  # both feeds failed: the display shows this and keeps its last picture
+                    return self._send({"error": str(e)}, 502)
+            if u.path == "/api/routes":
+                return self._send(flights.routes(q.get("cs", "").split(",")))
             if u.path == "/api/geo":
                 return self._send(GEO | {"towns": config.TOWNS, "home": [config.LAT, config.LON],
                                          "span_lon": config.MAP_SPAN_LON})

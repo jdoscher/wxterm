@@ -174,6 +174,7 @@
           <dt>48 hours</dt><dd>Temperature and dew point as braille line plots over rain-chance bars.</dd>
           <dt>Tide · moon</dt><dd>The tide curve through tomorrow with every high and low, plus the moon phase, rise and set.</dd>
           <dt>5-day</dt><dd>Highs, lows, rain chance and a few words for each day.</dd>
+          <dt>Air traffic</dt><dd>One key turns the map into a live flight tracker: aircraft as arrows with trails and data tags, runways, and the rain underneath.</dd>
           <dt>Rotating</dt><dd>A panel that cycles between the forecaster's discussion, typed out like a teletype, the surf, and temperatures from the coast inland.</dd>
         </dl>
       </div>
@@ -181,6 +182,7 @@
         <h2>Small touches</h2>
         <dl class="spec">
           <dt><kbd>l</kbd></dt><dd>Next location. Ten are built in: yours plus nine demo cities from San Francisco to Tokyo.</dd>
+          <dt><kbd>a</kbd></dt><dd>Radar or air traffic. <kbd>+</kbd> <kbd>-</kbd> change the range, <kbd>Tab</kbd> picks a flight, <kbd>t</kbd> cycles the data tags.</dd>
           <dt><kbd>g</kbd></dt><dd>Record exactly one radar loop as a GIF. Every GIF on this page was made that way.</dd>
           <dt><kbd>f</kbd></dt><dd>Big digits as segments, braille dots or blocks.</dd>
           <dt><kbd>s</kbd></dt><dd>Shuffle the layout. It also happens every 15 minutes, so nothing burns in.</dd>
@@ -268,7 +270,8 @@
         <tr><td>Tides</td><td><a href="https://tidesandcurrents.noaa.gov/api/">NOAA CO-OPS</a>, or Open-Meteo's sea-level model where there's no gauge</td></tr>
         <tr><td>Surf</td><td>Open-Meteo marine</td></tr>
         <tr><td>Sun · moon</td><td>Computed locally</td></tr>
-        <tr><td>Maps</td><td><a href="https://www.naturalearthdata.com">Natural Earth</a> (public domain) and <a href="https://www.geonames.org">GeoNames</a> town names</td></tr>
+        <tr><td>Aircraft</td><td><a href="https://github.com/adsbfi/opendata">adsb.fi</a> open data, with <a href="https://api.adsb.lol">adsb.lol</a> as a fallback; routes from <a href="https://www.adsbdb.com">adsbdb</a></td></tr>
+        <tr><td>Maps</td><td><a href="https://www.naturalearthdata.com">Natural Earth</a> (public domain), <a href="https://ourairports.com/data/">OurAirports</a> runways and <a href="https://www.geonames.org">GeoNames</a> town names</td></tr>
       </tbody>
     </table>
   </section>

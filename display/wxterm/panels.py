@@ -670,8 +670,15 @@ class StatusBar(Panel):
                 s = f"{'○' if bad or ent.get('error') else '●'} {label} {ago(ent.get('ok_at'))}"
                 c.put(x, 0, s, t.warn if bad or ent.get("error") else t.dim)
                 x += len(s) + 3
-        right = (f"{app.loc.upper()} [L]  THEME {app.pal.name} [C]  GIF [G]  SHUFFLE [S]  PAUSE [P]  REFRESH [R]"
-                 "  QUIT [Q]")
+        air = getattr(app, "map_mode", "radar") == "air"
+        tr = getattr(app, "traffic", None)
+        if air and tr is not None and not err:
+            bad = not tr.ok_at or bool(tr.error) or time.time() - tr.ok_at > 15
+            age = f"{time.time() - tr.ok_at:.0f}S" if tr.ok_at else "--"
+            s = f"{'○' if bad else '●'} {tr.source or 'ADS-B'} {age}"
+            c.put(x, 0, s, t.warn if bad else t.dim)
+        right = (f"{app.loc.upper()} [L]  THEME {app.pal.name} [C]  {'WX MAP' if air else 'AIR'} [A]  GIF [G]"
+                 f"  SHUFFLE [S]{'' if air else '  PAUSE [P]'}  REFRESH [R]  QUIT [Q]")
         rx = w - len(right) - 1
         msg = getattr(app, "gif_msg", "")
         if msg:

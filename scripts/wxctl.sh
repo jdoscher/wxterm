@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Control the running display from any shell on the host (the display polls its state file every 2 s).
 #   scripts/wxctl.sh location sf      scripts/wxctl.sh theme green      scripts/wxctl.sh font dots|segment|blocks
+#   scripts/wxctl.sh map air|radar    (air traffic or the weather radar loop on the big map, same as pressing a)
 #   scripts/wxctl.sh gif              (records one radar loop to ~/gifs, same as pressing g)
 set -euo pipefail
 . "$(dirname "$0")/../kiosk/lib.sh"
 state="${WXTERM_STATE:-$STATE_DIR/state.json}"
 [[ -e "$state" || -w "$(dirname "$state")" ]] || state="$HOME/.config/wxterm/state.json"
-cmd="${1:?usage: wxctl.sh location NAME | theme NAME | font NAME | gif | mcp}"
+cmd="${1:?usage: wxctl.sh location NAME | theme NAME | font NAME | map air|radar | gif | mcp}"
 val="${2:-}"
 if [[ "$cmd" == mcp ]]; then   # print how to connect an LLM client to the MCP server
   envf="$WXTERM_DIR/.env"
@@ -43,6 +44,10 @@ elif cmd == "theme":
     st["theme"] = val.upper()
 elif cmd == "font":
     st["bigfont"] = val.lower()
+elif cmd == "map":
+    if val.lower() not in ("air", "radar"):
+        sys.exit("map: air or radar")
+    st["map"] = val.lower()
 elif cmd == "gif":
     st["gif"] = str(time.time())
 else:

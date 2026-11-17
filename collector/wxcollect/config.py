@@ -51,7 +51,7 @@ MAP_SPAN_LON = _f("WX_MAP_SPAN_LON", 2.6)                           # degrees of
 PORT = int(os.environ.get("WX_PORT", 8091))
 DATA_DIR = os.environ.get("WX_DATA_DIR", "/data")
 # NWS asks every client to identify itself with a contact (URL or email). Set WX_UA (kiosk.conf: NWS_CONTACT).
-UA = os.environ.get("WX_UA") or "wxterm/1.0 (+https://wxterm.app)"
+UA = os.environ.get("WX_UA") or "wxterm/1.1 (+https://wxterm.app)"
 
 # Shore-to-mountains line for the transect panel, in drawing order (left to right)
 TRANSECT_TITLE = os.environ.get("WX_TRANSECT_TITLE", "SHORE TO CATSKILLS").upper()

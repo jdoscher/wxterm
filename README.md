@@ -8,6 +8,9 @@ source is free and needs no API key.
 It was built for an old ThinkPad (T480, 1920x1080) running as a dedicated kiosk with no desktop. Plug it in and it boots
 straight into the weather. It also runs in any big terminal window.
 
+> **Raspberry Pi 4 / 5: early testing.** Pi support is new in 1.1 and hasn't been proven on real hardware yet.
+> See [Raspberry Pi (early testing)](#raspberry-pi-early-testing) for how to install it and what's still unknown.
+
 **Website:** [wxterm.app](https://wxterm.app)
 
 | | |
@@ -36,6 +39,7 @@ collectors (Docker, one per location, localhost:8091+)  ── JSON ──>  dis
 - **Five themes:** amber, green, white, IBM blue, colour
 - **GIF capture** of one radar loop with one key
 - **Burn-in guard** that reshuffles the layout every 15 minutes
+- **Raspberry Pi 4/5** support, in early testing
 - **MCP server** (optional) so an LLM can read the weather and the kiosk's status, and look at the screen
 
 ## Quick start (any Linux or macOS machine with Docker and Python 3.11+)
@@ -74,7 +78,8 @@ On the air traffic map:
 
 ## Kiosk setup (Debian or Ubuntu, tested on Debian 13)
 ```bash
-sudo git clone https://github.com/jdoscher/wxterm /opt/wxterm && cd /opt/wxterm
+sudo mkdir -p /opt/wxterm && sudo chown "$USER": /opt/wxterm
+git clone https://github.com/jdoscher/wxterm /opt/wxterm && cd /opt/wxterm
 cp kiosk/kiosk.conf.example kiosk/kiosk.conf && nano kiosk/kiosk.conf
 python3 scripts/new-location.py home LAT LON --title "YOUR TOWN"
 sudo bash kiosk/setup.sh && sudo reboot
@@ -99,6 +104,9 @@ change `kiosk.conf`. Every setting:
 | `GIF_FPS` | `10` | GIF frame rate |
 | `FONT`, `FONT_SIZE` | `DejaVu Sans Mono`, `13` | terminal font (13 px gives 240x62 cells at 1080p) |
 | `KIOSK_MODE` | `yes` | boot straight into the display after setup |
+| `PROFILE` | `standard` | `pi` for a Raspberry Pi (early testing): slower animation and four locations unless `LOCATIONS` says otherwise |
+| `LOCATIONS` | all (`pi`: `home sf london tokyo`) | which locations to run, by name; each is a ~70 MB collector |
+| `RADAR_STEP`, `TYPE_STEP` | `0.35`, `0.15` (`pi`: `0.5`, `0.3`) | seconds per radar frame and per teletype step |
 | `MCP` | `no` | `yes` runs the MCP server (below) |
 | `MCP_PORT`, `MCP_BIND` | `8090`, `0.0.0.0` | where it listens: all interfaces, one LAN address, or `127.0.0.1` |
 | `MCP_TOKEN` | generated | bearer token clients must send; blank = generate one and keep it in `.env` |
@@ -114,6 +122,42 @@ Day to day:
 
 **Burn-in guard:** every `SHUFFLE_MIN` minutes the map swaps sides, the sidebar panels reorder and the status bar moves
 between top and bottom. That's 480 layouts, so no border or label stays on the same pixels for hours.
+
+## Raspberry Pi (early testing)
+
+> **Status: early testing.** wxterm 1.1 passes an emulated ARM64 test (Docker images build, a collector fetches
+> every source, the display renders, and every package setup needs exists for arm64), but it hasn't been run for any
+> length of time on a real Pi. Expect rough edges, and please
+> [open an issue](https://github.com/jdoscher/wxterm/issues) with your model, OS and what happened.
+
+**You need:** a Raspberry Pi 4 with 4 GB or more (a Pi 5 should also work), a 1080p screen on HDMI, and ideally a
+USB SSD to boot from. The collectors write their cache every few minutes around the clock, which wears out SD cards.
+
+**1. Flash the OS.** In [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose
+**Raspberry Pi OS Lite (64-bit)** and your SSD (or SD card). In the settings, set a username and password, your Wi-Fi
+if you're not using Ethernet, and turn on SSH. Boot the Pi with the screen plugged into the HDMI port next to the
+power socket.
+
+**2. Install wxterm.** SSH in, then:
+```bash
+sudo apt update && sudo apt full-upgrade -y && sudo apt install -y git
+sudo mkdir -p /opt/wxterm && sudo chown "$USER": /opt/wxterm
+git clone https://github.com/jdoscher/wxterm /opt/wxterm && cd /opt/wxterm
+cp kiosk/kiosk.conf.example kiosk/kiosk.conf
+sed -i 's/^PROFILE=standard/PROFILE=pi/' kiosk/kiosk.conf
+python3 scripts/new-location.py home LAT LON --title "YOUR TOWN"
+sudo bash kiosk/setup.sh && sudo reboot
+```
+Replace `LAT LON` with your coordinates (e.g. `47.6062 -122.3321`). `new-location.py` downloads about 100 MB of map data
+once, and setup builds the Docker images on the Pi, so the first run takes a while. After the reboot it goes straight to the weather screen.
+
+**What `PROFILE=pi` changes:** it runs four locations (home, San Francisco, London, Tokyo) instead of ten, saving
+about 400 MB of memory, and animates a little slower (radar 0.5 s per frame, teletype 0.3 s per step). Pick your own
+cities with `LOCATIONS="home nyc paris"` in `kiosk.conf`, then rerun `sudo bash kiosk/setup.sh`.
+
+**Not known yet:** CPU load and temperature over days of running, how long `g` takes to encode a GIF (slower than
+on a laptop), and whether a Pi 5 or a 2 GB Pi 4 needs different settings. To go back to a normal console boot:
+`sudo /opt/wxterm/kiosk/mode.sh desktop --now`.
 
 ## Air traffic
 Press `a` and the map shows the sky instead of the rain. It's a port of AsciiFlights, a flight tracker for the

@@ -26,7 +26,7 @@ cd "$WXTERM_DIR"
 echo "== locations + collectors"
 ls locations/*.env >/dev/null 2>&1 || { echo "no locations; add one with scripts/new-location.py"; exit 1; }
 [[ -f locations/home.env ]] || echo "   note: no locations/home.env yet. Make yours with: scripts/new-location.py home LAT LON"
-ua="wxterm/1.0 (+https://wxterm.app${NWS_CONTACT:+; $NWS_CONTACT})"
+ua="wxterm/1.1 (+https://wxterm.app${NWS_CONTACT:+; $NWS_CONTACT})"
 id "$KIOSK_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$KIOSK_USER"
 install -d -m 2775 -o "$KIOSK_USER" -g "$KIOSK_USER" "$STATE_DIR" "$STATE_DIR/requests"
 token="$MCP_TOKEN"
@@ -40,6 +40,7 @@ umask 077
   printf 'WX_UA=%s\n' "$ua"
   echo "STATE_DIR=$STATE_DIR"
   echo "KIOSK_GID=$(getent group "$KIOSK_USER" | cut -d: -f3)"
+  echo "WXTERM_ONLY=$LOCATIONS"
   if [[ "$MCP" == yes ]]; then
     echo "COMPOSE_PROFILES=mcp"
     echo "MCP_TOKEN=$token"
@@ -57,7 +58,9 @@ echo "== display venv"
 display/.venv/bin/pip -q install -e display
 
 echo "== kiosk user $KIOSK_USER + $STATE_DIR"
-usermod -aG video,input,render "$KIOSK_USER"
+for g in video input render; do   # render doesn't exist on every distro
+  getent group "$g" >/dev/null && usermod -aG "$g" "$KIOSK_USER"
+done
 install -d -m 2775 -o "$KIOSK_USER" -g "$KIOSK_USER" "$STATE_DIR/gifs" "$STATE_DIR/captures"
 for u in $ADMIN_USERS $DEPLOY_USER; do
   id "$u" >/dev/null 2>&1 || continue
@@ -78,6 +81,9 @@ WXTERM_BIGFONT=$BIGFONT
 WXTERM_MAP=$MAP
 WXTERM_SHUFFLE_MIN=$SHUFFLE_MIN
 WXTERM_GIF_FPS=$GIF_FPS
+WXTERM_ONLY=$LOCATIONS
+WXTERM_RADAR_STEP=$RADAR_STEP
+WXTERM_TYPE_STEP=$TYPE_STEP
 EOF
 chown "$KIOSK_USER:$KIOSK_USER" "$STATE_DIR/display.env"
 H=$(getent passwd "$KIOSK_USER" | cut -d: -f6)

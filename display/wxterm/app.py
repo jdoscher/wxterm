@@ -52,6 +52,10 @@ class WxApp(App):
     # so no border or label sits on the same pixels for hours. 0 turns it off.
     SHUFFLE_MIN = float(os.environ.get("WXTERM_SHUFFLE_MIN", "15"))
     SIDEBAR = ("#now", "#graph", "#tide", "#days", "#extras")
+    # Animation speed: seconds per radar frame and per teletype step. Slower values save CPU on small boards
+    # (kiosk.conf PROFILE=pi sets 0.5 and 0.3).
+    RADAR_STEP = max(0.1, float(os.environ.get("WXTERM_RADAR_STEP", "0.35")))
+    TYPE_STEP = max(0.05, float(os.environ.get("WXTERM_TYPE_STEP", "0.15")))
 
     def __init__(self):
         super().__init__()
@@ -128,8 +132,8 @@ class WxApp(App):
         # retry fast until frames arrive: right after boot a collector can answer with an empty loop
         self.set_interval(10, lambda: not (self.radar or {}).get("frames") and self.request_radar())
         self.set_interval(1, self._tick)
-        self.set_interval(0.35, self._radar_tick)
-        self.set_interval(0.15, self._extras_tick)
+        self.set_interval(self.RADAR_STEP, self._radar_tick)
+        self.set_interval(self.TYPE_STEP, self._extras_tick)
         self.set_interval(2, self._watch_state)
         self.set_interval(10, self._write_status)
         self.set_interval(2.5, self._air_poll)
@@ -278,7 +282,7 @@ class WxApp(App):
             self.flash(why)
             return
         frames = len((self.radar or {}).get("frames") or []) or 13
-        seconds = (frames + 8) * 0.35 + 0.4   # every frame plus the hold on the latest = one clean loop
+        seconds = (frames + 8) * self.RADAR_STEP + 0.4   # every frame plus the hold on the latest = one clean loop
         if self.map_mode == "air":
             seconds = 10.0                    # no loop to follow: ten seconds of traffic
         self.radar_idx, self.radar_hold, self.radar_paused = 0, 0, False
@@ -596,10 +600,13 @@ class WxApp(App):
 
     def _extras_tick(self):
         slots = ExtrasPanel.available(self)
+        panel = self.query_one(ExtrasPanel)
         if time.time() - self.extras_since > slots[self.extras_idx % len(slots)][1]:
             self.extras_idx = (self.extras_idx + 1) % len(slots)
             self.extras_since = time.time()
-        self.query_one("#extras").refresh()
+            panel.typing = True  # draw the new slot now
+        if panel.typing:  # static slots (surf, transect, a finished discussion) only redraw when data changes
+            panel.refresh()
 
 
 def main():

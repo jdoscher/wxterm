@@ -93,10 +93,21 @@
   }
   pre .c { color: var(--dim); }
   pre .p { color: var(--dim); user-select: none; }
-  .copy { float: right; margin: -6px -8px 0 12px; background: none; border: 1px solid var(--faint); color: var(--dim);
+  pre { position: relative; }
+  pre:has(.copy) { padding-top: 40px; }
+  .copy { position: absolute; top: 6px; right: 6px; background: none; border: 1px solid var(--faint); color: var(--dim);
           font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; min-height: 28px; }
   .copy:hover { color: var(--bright); border-color: var(--dim); }
 
+  .badge { display: inline-block; border: 1px solid var(--accent); color: var(--accent); padding: 1px 8px;
+           font-size: 12px; letter-spacing: .12em; text-transform: uppercase; vertical-align: middle; margin-left: 10px; }
+  .note { border: 1px dashed var(--accent); padding: 14px 18px; margin: 0 0 22px; max-width: 92ch; }
+  .note b { color: var(--accent); }
+  .newline { margin-top: 14px; font-size: 14px; color: var(--dim); }
+  .newline a { color: var(--accent); }
+  ol.steps { margin: 0 0 16px; padding-left: 0; list-style: none; counter-reset: s; }
+  ol.steps li { counter-increment: s; margin: 0 0 12px; padding-left: 4ch; position: relative; }
+  ol.steps li::before { content: counter(s) "."; position: absolute; left: 0; color: var(--bright); }
   .chat p { margin: 0 0 10px; }
   .chat .q { color: var(--bright); }
   .chat .q::before { content: "> "; color: var(--dim); }
@@ -130,7 +141,7 @@
   <b>WXTERM</b><span class="dot">v1.1</span>
   <span class="dot" id="themeName">AMBER</span>
   <nav aria-label="Sections">
-    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#kiosk">Kiosk</a><a href="#mcp">MCP</a><a href="#data">Data</a>
+    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#kiosk">Kiosk</a><a href="#pi">Pi</a><a href="#mcp">MCP</a><a href="#data">Data</a>
     <a href="https://github.com/jdoscher/wxterm">GitHub</a>
   </nav>
 </div></div>
@@ -142,6 +153,7 @@
       <p class="lede">wxterm is a full-screen terminal weather display: a live radar loop over a line-drawn map,
         conditions, a 48-hour graph, tides, the moon and the forecast, in ASCII, box-drawing and braille.
         It runs on an old laptop as a kiosk with no desktop, or in any big terminal window.</p>
+      <p class="newline">New in 1.1: <a href="#pi">Raspberry Pi 4 and 5 support</a>, in early testing.</p>
     </div>
     <div class="hero-actions">
       <a class="btn" href="https://github.com/jdoscher/wxterm">GitHub&nbsp;→</a>
@@ -220,7 +232,9 @@
         <p>wxterm was built for an old ThinkPad that does nothing else. One script turns a Debian or Ubuntu
           machine into a weather terminal: it boots straight to the display, with no login screen and no
           desktop, and ignores the lid and sleep.</p>
-<pre><button class="copy" type="button">copy</button><code><span class="p">$ </span>cp kiosk/kiosk.conf.example kiosk/kiosk.conf
+<pre><button class="copy" type="button">copy</button><code><span class="p">$ </span>sudo mkdir -p /opt/wxterm && sudo chown "$USER": /opt/wxterm
+<span class="p">$ </span>git clone https://github.com/jdoscher/wxterm /opt/wxterm && cd /opt/wxterm
+<span class="p">$ </span>cp kiosk/kiosk.conf.example kiosk/kiosk.conf
 <span class="p">$ </span>python3 scripts/new-location.py home LAT LON --title "YOUR TOWN"
 <span class="p">$ </span>sudo bash kiosk/setup.sh && sudo reboot</code></pre>
       </div>
@@ -229,10 +243,46 @@
           <a href="https://codeberg.org/dnkl/foot">foot</a> fullscreen. The bare Linux console can't
           show braille, so wxterm skips it. One config file covers every setting, and
           <code>mode.sh desktop</code> gives you the normal desktop back.</p>
-        <p>Raspberry Pi 4 and 5 support is in early testing: set <code>PROFILE=pi</code> and it runs four
-          cities with lighter animation.</p>
+        <p>Raspberry Pi? See <a href="#pi">below</a>.</p>
         <p>The data side runs in Docker, one small collector per location, so switching cities is instant.
           The display itself is Python with <a href="https://textual.textualize.io">Textual</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="pi">
+    <h2>Raspberry Pi <span class="badge">Early testing</span></h2>
+    <div class="note">
+      <b>Early testing.</b> Pi support is new in 1.1. It passes an emulated ARM64 test: the Docker images build, a
+      collector fetches every source, the display renders, and every package it needs exists for arm64. It hasn't run
+      for any length of time on a real Pi yet. Expect rough edges, and please
+      <a href="https://github.com/jdoscher/wxterm/issues">open an issue</a> with your model, OS and what happened.
+    </div>
+    <div class="cols">
+      <div>
+        <p><b>You need</b> a Raspberry Pi 4 with 4 GB or more (a Pi 5 should also work), a 1080p screen on HDMI, and
+          ideally a USB SSD to boot from. The collectors write their cache every few minutes around the clock, which
+          wears out SD cards.</p>
+        <ol class="steps">
+          <li>In <a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a>, flash
+            <b>Raspberry Pi OS Lite (64-bit)</b>. In its settings, set a username, your Wi-Fi if needed, and turn on SSH.</li>
+          <li>Plug the screen into the HDMI port next to the power socket, boot, and SSH in.</li>
+          <li>Run the commands on the right, with your own coordinates. The first run downloads map data and builds the
+            Docker images, so it takes a while. After the reboot the Pi goes straight to the weather.</li>
+        </ol>
+      </div>
+      <div>
+<pre><button class="copy" type="button">copy</button><code><span class="p">$ </span>sudo apt update && sudo apt full-upgrade -y && sudo apt install -y git
+<span class="p">$ </span>sudo mkdir -p /opt/wxterm && sudo chown "$USER": /opt/wxterm
+<span class="p">$ </span>git clone https://github.com/jdoscher/wxterm /opt/wxterm && cd /opt/wxterm
+<span class="p">$ </span>cp kiosk/kiosk.conf.example kiosk/kiosk.conf
+<span class="p">$ </span>sed -i 's/^PROFILE=standard/PROFILE=pi/' kiosk/kiosk.conf
+<span class="p">$ </span>python3 scripts/new-location.py home LAT LON --title "YOUR TOWN"
+<span class="p">$ </span>sudo bash kiosk/setup.sh && sudo reboot</code></pre>
+        <p><code>PROFILE=pi</code> runs four cities (home, San Francisco, London, Tokyo) instead of ten and animates a
+          little slower. Choose your own with <code>LOCATIONS="home nyc paris"</code> in <code>kiosk.conf</code>.</p>
+        <p><b>Not known yet:</b> load and temperature over days of running, GIF encode time, and whether a Pi 5 or a
+          2 GB Pi 4 wants different settings.</p>
       </div>
     </div>
   </section>

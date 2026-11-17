@@ -18,3 +18,5 @@ logs/
 /docker-compose.yml
 /kiosk/kiosk.conf
 .ruff_cache/
+.pytest_cache/
+*.egg-info/

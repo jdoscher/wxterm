@@ -269,6 +269,9 @@ Radar tiles are cached on disk, and requests back off on rate limits. Weather da
 data is CC BY 4.0.
 
 ## Development
+- Tests: `pip install -r requirements-dev.txt`, then `pytest` from the repo root (about 20 s, no network: the
+  collector and the feeds are faked). They cover the air traffic map from the collector's lookups through to the
+  keys and what reaches the screen.
 - `python -m wxterm.snap OUTDIR 240 67 [themes...]` (with `WXTERM_LOCATION=sf`) renders the screen headless to SVG
   and fails if any panel shows an error. `WXTERM_MAP=air` renders the air traffic map instead.
 - Collector API, per location (localhost only): `GET /api/all`, `/api/radar?w=&h=` (optional `&bbox=` and `&last=N`

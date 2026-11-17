@@ -1,0 +1,4 @@
+# Everything the tests need, in one venv: pip install -r requirements-dev.txt, then run pytest from the repo root.
+-e ./display
+-r collector/requirements.txt
+pytest>=8

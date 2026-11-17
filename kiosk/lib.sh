@@ -17,6 +17,13 @@ GIF_FPS="${GIF_FPS:-10}"
 FONT="${FONT:-DejaVu Sans Mono}"
 FONT_SIZE="${FONT_SIZE:-13}"
 KIOSK_MODE="${KIOSK_MODE:-yes}"
+PROFILE="${PROFILE:-standard}"
+if [[ "$PROFILE" == pi ]]; then
+  LOCATIONS="${LOCATIONS:-home sf london tokyo}"; RADAR_STEP="${RADAR_STEP:-0.5}"; TYPE_STEP="${TYPE_STEP:-0.3}"
+fi
+LOCATIONS="${LOCATIONS:-}"
+RADAR_STEP="${RADAR_STEP:-0.35}"
+TYPE_STEP="${TYPE_STEP:-0.15}"
 MCP="${MCP:-no}"
 MCP_PORT="${MCP_PORT:-8090}"
 MCP_BIND="${MCP_BIND:-0.0.0.0}"

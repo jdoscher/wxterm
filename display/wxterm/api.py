@@ -8,13 +8,20 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import urllib.request
 from pathlib import Path
 
 LOC_DIR = Path(os.environ.get("WXTERM_LOCATIONS_DIR") or Path(__file__).resolve().parents[2] / "locations")
 
 
+def _only() -> set[str]:
+    # WXTERM_ONLY (kiosk.conf LOCATIONS): space- or comma-separated names to show; empty = all
+    return {n for n in re.split(r"[\s,]+", os.environ.get("WXTERM_ONLY", "")) if n}
+
+
 def _from_order() -> list[tuple[str, str]]:
+    keep = _only()
     out = []
     try:
         lines = (LOC_DIR / "order").read_text().splitlines()
@@ -22,7 +29,7 @@ def _from_order() -> list[tuple[str, str]]:
         return [("nyc", "http://localhost:8092")]
     for line in lines:
         f = line.split("#", 1)[0].split()
-        if len(f) == 2 and (LOC_DIR / f"{f[0]}.env").exists():
+        if len(f) == 2 and (LOC_DIR / f"{f[0]}.env").exists() and (not keep or f[0] in keep):
             out.append((f[0], f"http://localhost:{f[1]}"))
     return out or [("nyc", "http://localhost:8092")]
 

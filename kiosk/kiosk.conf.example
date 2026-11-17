@@ -17,6 +17,16 @@ ADMIN_USERS=
 # The NWS asks every API client to include a contact (email or URL) in its User-Agent
 NWS_CONTACT=
 
+# --- Hardware profile ---
+# standard: laptops and mini PCs. pi: Raspberry Pi 4/5, early testing (slower animation, four locations by default)
+PROFILE=standard
+# Locations to run, by name from locations/order (space-separated). Blank = all of them, or for PROFILE=pi:
+# "home sf london tokyo". Each location is one ~70 MB collector.
+LOCATIONS=
+# Seconds per radar frame and per teletype step. Blank = the profile's default (standard 0.35 / 0.15, pi 0.5 / 0.3)
+RADAR_STEP=
+TYPE_STEP=
+
 # --- Display ------------------------------------------------------------------------------------------------
 # Location shown at every start; other cities are a manual toggle (l). Names come from locations/order
 START_LOCATION=home

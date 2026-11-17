@@ -7,6 +7,8 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from rich.style import Style as RichStyle
+from textual.strip import Strip
 from textual.widget import Widget
 
 from . import glyphs
@@ -82,16 +84,37 @@ class Panel(Widget):
         age = (datetime.now(TZ) - ptime(ent["ok_at"])).total_seconds()
         return age > 3 * (ent.get("interval") or 600) + 120
 
-    def render(self):
+    # Panels draw into a Canvas and hand Textual ready-made Strips through the line API (render_line), cached until
+    # the next refresh(). Going through render() -> Rich Text costs Textual a full conversion on every redraw.
+    _strips: list | None = None
+
+    def canvas(self) -> Canvas:
         w, h = self.size.width, self.size.height
         c = Canvas(w, h)
         try:
             self.draw(c, self.pal, w, h)
         except Exception as e:  # noqa: BLE001 - a broken panel shouldn't take down the screen
+            c = Canvas(w, h)
             c.box(0, 0, w, h, self.pal.dim, "ERROR", self.pal.warn)
             for i, line in enumerate(textwrap.wrap(f"{type(e).__name__}: {e}", max(10, w - 4))[: h - 2]):
                 c.put(2, 1 + i, line, self.pal.warn)
-        return c.render()
+        return c
+
+    def build_strips(self) -> list:
+        bg = RichStyle(bgcolor=self.pal.bg)  # the line API skips the widget background, so paint the theme's in
+        return [s.apply_style(bg) for s in self.canvas().strips()]
+
+    def refresh(self, *args, **kwargs):
+        self._strips = None
+        return super().refresh(*args, **kwargs)
+
+    def render_line(self, y: int):
+        if self._strips is None or len(self._strips) != self.size.height:
+            self._strips = self.build_strips()
+        return self._strips[y] if 0 <= y < len(self._strips) else Strip.blank(self.size.width)
+
+    def render(self):  # used by tests and snapshots that render a panel on its own
+        return self.canvas().render()
 
     def draw(self, c: Canvas, t: Theme, w: int, h: int):  # pragma: no cover - abstract
         raise NotImplementedError
@@ -185,6 +208,36 @@ DENS = (0, 2, 3, 5, 7, 8)
 
 
 class RadarPanel(Panel):
+    """The radar loop. Each frame is drawn once and cached, so later passes of the loop cost almost nothing
+    (the map and the rain are redrawn only when the data, size, theme or location changes)."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._frames: dict[tuple, object] = {}
+        self._base: tuple | None = None
+
+    def _key(self) -> tuple | None:
+        app = self.app
+        radar, geo = getattr(app, "radar", None), getattr(app, "geo", None)
+        frames = (radar or {}).get("frames") or []
+        if not frames or not geo:
+            return None
+        idx = min(getattr(app, "radar_idx", 0), len(frames) - 1)
+        base = (self.size.width, self.size.height, radar.get("w"), radar.get("h"), tuple(radar.get("bbox") or ()),
+                id(geo), self.pal.name, getattr(app, "loc", ""), self.label("name"), len(frames))
+        if base != self._base:
+            self._base, self._frames = base, {}
+        return frames[idx]["t"], idx, bool(getattr(app, "radar_paused", False))
+
+    def build_strips(self) -> list:
+        key = self._key()
+        if key is None:
+            return super().build_strips()
+        hit = self._frames.get(key)
+        if hit is None or len(hit) != self.size.height:
+            hit = self._frames[key] = super().build_strips()
+        return hit
+
     def dot_size(self) -> tuple[int, int]:
         return max(2, (self.size.width - 2) * 2), max(2, (self.size.height - 2) * 4)
 
@@ -514,9 +567,12 @@ class ExtrasPanel(Panel):
         i = getattr(app, "extras_idx", 0) % len(slots)
         return slots[i][0], time.time() - getattr(app, "extras_since", time.time()), i, len(slots)
 
+    typing = False  # True while the discussion is still being typed out; the app only redraws the panel then
+
     def draw(self, c, t, w, h):
         kind, el, i, n = self.current()
         dots = "".join("●" if k == i else "○" for k in range(n))
+        self.typing = False
         getattr(self, f"_{kind}")(c, t, w, h, el, dots)
 
     def _afd(self, c, t, w, h, el, dots):
@@ -536,8 +592,10 @@ class ExtrasPanel(Panel):
         lines = lines[-(h - 2):]
         for r, line in enumerate(lines):
             c.put(3, 1 + r, line, t.fg)
-        if n < len(text) and int(time.time() * 2) % 2 == 0:
-            c.put(3 + len(lines[-1]), len(lines), "█", t.bright)
+        if n < len(text):
+            self.typing = True
+            if int(time.time() * 2) % 2 == 0:
+                c.put(3 + len(lines[-1]), len(lines), "█", t.bright)
 
     def _surf(self, c, t, w, h, el, dots):
         m = self.src("marine") or {}

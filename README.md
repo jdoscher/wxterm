@@ -83,9 +83,21 @@ change `kiosk.conf`. Every setting:
 | `GIF_FPS` | `10` | GIF frame rate |
 | `FONT`, `FONT_SIZE` | `DejaVu Sans Mono`, `13` | terminal font (13 px gives 240x62 cells at 1080p) |
 | `KIOSK_MODE` | `yes` | boot straight into the display after setup |
+| `PROFILE` | `standard` | `pi` for a Raspberry Pi (early testing): slower animation and four locations unless `LOCATIONS` says otherwise |
+| `LOCATIONS` | all (`pi`: `home sf london tokyo`) | which locations to run, by name; each is a ~70 MB collector |
+| `RADAR_STEP`, `TYPE_STEP` | `0.35`, `0.15` (`pi`: `0.5`, `0.3`) | seconds per radar frame and per teletype step |
 | `MCP` | `no` | `yes` runs the MCP server (below) |
 | `MCP_PORT`, `MCP_BIND` | `8090`, `0.0.0.0` | where it listens: all interfaces, one LAN address, or `127.0.0.1` |
 | `MCP_TOKEN` | generated | bearer token clients must send; blank = generate one and keep it in `.env` |
+
+### Raspberry Pi (early testing)
+Pi support is new: it passes an emulated ARM64 test but hasn't had much time on real hardware yet, so please
+[open an issue](https://github.com/jdoscher/wxterm/issues) with what you find.
+
+A Raspberry Pi 4 (4 GB) or Pi 5 with 64-bit Raspberry Pi OS Lite works the same way: set `PROFILE=pi` in
+`kiosk.conf` and run `setup.sh`. Use a USB SSD rather than the SD card if you can, because the collectors write their
+cache every few minutes, around the clock. On a 1080p HDMI screen it uses the same 240x62 layout. GIF capture works
+but takes a minute to encode.
 
 Day to day:
 - `sudo kiosk/mode.sh desktop` (or `kiosk`) switches between the normal desktop and the kiosk, effective at the next

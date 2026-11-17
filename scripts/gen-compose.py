@@ -6,6 +6,8 @@ when the display switches to them. Run after adding or removing a location.
 """
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +30,7 @@ MCP_SERVICE = [
     '    group_add: ["${KIOSK_GID:-65534}"]  # the kiosk group, to drop screenshot requests',
     "    environment:",
     '      MCP_TOKEN: "${MCP_TOKEN:-}"',
+    '      WXTERM_ONLY: "${WXTERM_ONLY:-}"',
     '    ports: ["${MCP_BIND:-0.0.0.0}:${MCP_PORT:-8090}:8090"]',
     "    volumes:",
     '      - "./locations:/locations:ro"',
@@ -46,8 +49,22 @@ def read_order() -> list[tuple[str, int]]:
     return out
 
 
+def only() -> set[str]:
+    """WXTERM_ONLY from the environment, else from .env (kiosk.conf LOCATIONS, written by setup.sh). Empty = all."""
+    val = os.environ.get("WXTERM_ONLY")
+    if val is None:
+        try:
+            for line in (ROOT / ".env").read_text().splitlines():
+                if line.startswith("WXTERM_ONLY="):
+                    val = line.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    return {n for n in re.split(r"[\s,]+", val or "") if n}
+
+
 def main():
-    locs = [(n, p) for n, p in read_order() if (LOC / f"{n}.env").exists()]
+    keep = only()
+    locs = [(n, p) for n, p in read_order() if (LOC / f"{n}.env").exists() and (not keep or n in keep)]
     if not locs:
         raise SystemExit("no locations: add one with scripts/new-location.py")
     out = [
@@ -76,7 +93,8 @@ def main():
     out += MCP_SERVICE
     out += ["", "volumes:"] + [f"  wx-{n}:" for n, _ in locs]
     (ROOT / "docker-compose.yml").write_text("\n".join(out) + "\n")
-    print(f"docker-compose.yml: {', '.join(n for n, _ in locs)}")
+    print(f"docker-compose.yml: {', '.join(n for n, _ in locs)}" + (f" (LOCATIONS: {' '.join(sorted(keep))})"
+                                                                    if keep else ""))
 
 
 if __name__ == "__main__":

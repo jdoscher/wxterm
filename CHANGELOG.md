@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 (2026-11-16)
+
+- Raspberry Pi support, **early testing**: `PROFILE=pi` in `kiosk.conf` (slower animation, four locations by default), and
+  `LOCATIONS` to choose which collectors run on any machine. Setup skips groups a distro doesn't have.
+  Tested under ARM64 emulation (images, collector, display, packages); reports from real Pis welcome.
+- The display uses about a quarter of the CPU it did: radar frames are drawn once per loop and cached, panels hand
+  Textual ready-made lines instead of Rich text, and the rotating panel only redraws while it's typing.
+- `RADAR_STEP` and `TYPE_STEP` settings for animation speed.
+
 ## 1.0.0 (2026-11-16)
 
 First public release.

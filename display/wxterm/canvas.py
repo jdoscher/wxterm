@@ -1,7 +1,12 @@
 """Character canvas with a braille dot layer (2x4 dots per cell) and a text layer on top."""
 from __future__ import annotations
 
+from functools import lru_cache
+
+from rich.segment import Segment
+from rich.style import Style
 from rich.text import Text
+from textual.strip import Strip
 
 _BITS = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))  # [dy][dx]
 BAYER = ((0, 4), (6, 2), (1, 5), (7, 3))                             # 2x4 ordered dither thresholds 0..7
@@ -71,6 +76,29 @@ class Canvas:
         if right and w > len(right) + len(title) + 10:
             self.put(x + w - len(right) - 4, y, f" {right} ", tstyle or style)
 
+    def _runs(self, y: int):
+        """(text, style) runs for one row: the text layer wins over dots."""
+        run, rstyle = [], None
+        chars, cstyle, text, dots, dstyle = self.chars[y], self.cstyle[y], self.text[y], self.dots[y], self.dstyle[y]
+        for x in range(self.w):
+            if text[x]:
+                ch, st = chars[x], cstyle[x]
+            elif dots[x]:
+                ch, st = chr(0x2800 + dots[x]), dstyle[x]
+            else:
+                ch, st = " ", cstyle[x]
+            if st != rstyle and run:
+                yield "".join(run), rstyle
+                run = []
+            rstyle = st
+            run.append(ch)
+        if run:
+            yield "".join(run), rstyle
+
+    def strips(self) -> list[Strip]:
+        """One Textual Strip per row, built directly (much cheaper than Text -> Content -> Strip every refresh)."""
+        return [Strip([Segment(t, _style(st)) for t, st in self._runs(y)], self.w) for y in range(self.h)]
+
     def render(self) -> Text:
         out = Text(no_wrap=True, overflow="crop")
         for y in range(self.h):
@@ -92,3 +120,8 @@ class Canvas:
             if y < self.h - 1:
                 out.append("\n")
         return out
+
+
+@lru_cache(maxsize=512)
+def _style(spec: str | None) -> Style:
+    return Style.parse(spec) if spec else Style.null()

@@ -28,7 +28,7 @@ from . import system, weather
 from .weather import STATE_DIR, WxError
 
 log = logging.getLogger("wxmcp")
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 PORT = int(os.environ.get("WXMCP_PORT", "8090"))
 RATE_PER_MIN = int(os.environ.get("WXMCP_RATE_PER_MIN", "120"))
 SHOT_GAP_S = 3.0

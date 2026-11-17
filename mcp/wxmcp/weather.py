@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -52,6 +53,7 @@ def _env(name: str) -> dict:
 
 
 def locations() -> list[dict]:
+    keep = {n for n in re.split(r"[\s,]+", os.environ.get("WXTERM_ONLY", "")) if n}  # kiosk.conf LOCATIONS
     out = []
     try:
         lines = (LOC_DIR / "order").read_text().splitlines()
@@ -59,7 +61,7 @@ def locations() -> list[dict]:
         return out
     for line in lines:
         f = line.split("#", 1)[0].split()
-        if len(f) == 2 and (LOC_DIR / f"{f[0]}.env").exists():
+        if len(f) == 2 and (LOC_DIR / f"{f[0]}.env").exists() and (not keep or f[0] in keep):
             env = _env(f[0])
             out.append({"name": f[0], "title": env.get("WX_NAME", f[0].upper()),
                         "provider": env.get("WX_PROVIDER", "nws")})

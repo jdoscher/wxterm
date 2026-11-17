@@ -10,6 +10,7 @@ os.environ["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="wxsnap-")  # never touc
 os.environ.pop("WXTERM_STATE", None)
 
 from .app import WxApp  # noqa: E402
+from .panels import ExtrasPanel  # noqa: E402
 from .themes import THEMES  # noqa: E402
 
 
@@ -23,10 +24,10 @@ async def run(out: str, w: int, h: int, themes: list[str]):
         app.radar_paused = True
         app.radar_idx = len((app.radar or {}).get("frames") or [1]) - 1
         bad = []
-        for k in range(3):  # every rotating extras slot, every panel: no ERROR boxes
+        for k in range(len(ExtrasPanel.available(app))):  # every rotating extras slot, every panel: no ERROR boxes
             app.extras_idx = k
             await pilot.pause(0.3)
-            for wdg in app.query("#now, #radar, #graph, #tide, #days, #extras, #status"):
+            for wdg in app.query("#now, #radar, #aprsmap, #graph, #tide, #days, #extras, #status"):
                 txt = str(wdg.render())
                 if "ERROR" in txt[:400]:
                     bad.append((k, wdg.id, txt[:300]))

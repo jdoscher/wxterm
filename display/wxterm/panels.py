@@ -224,7 +224,7 @@ class RadarPanel(Panel):
             return None
         idx = min(getattr(app, "radar_idx", 0), len(frames) - 1)
         base = (self.size.width, self.size.height, radar.get("w"), radar.get("h"), tuple(radar.get("bbox") or ()),
-                id(geo), self.pal.name, getattr(app, "loc", ""), self.label("name"), len(frames))
+                id(geo), self.pal.name, getattr(app, "loc", ""), self.label("name"), len(frames), aprs.stamp(app))
         if base != self._base:
             self._base, self._frames = base, {}
         return frames[idx]["t"], idx, bool(getattr(app, "radar_paused", False))
@@ -309,6 +309,9 @@ class RadarPanel(Panel):
                 sub.put(cx, cy, "·" + name if cx < sub.w - len(name) - 2 else name + "·", t.dim)
         mark = "HOME" if getattr(app, "loc", "") == "home" else self.label("name", "HERE")
         sub.put(int(hx) // 2, int(hy) // 4, "⌂ " + mark, t.bright)
+        view = getattr(app, "aprs_view", "OFF")
+        if view in ("WX", "ALL") and aprs.stations(app):
+            aprs.draw_stations(sub, t, aprs.stations(app), sub_p, view, time.time())
         if not any_rain:
             sub.put(1, sub.h - 1, "NO PRECIPITATION IN RANGE", t.dim)
         # legend
@@ -553,13 +556,18 @@ class DaysPanel(Panel):
 # --- rotating extras: discussion teletype / surf / coast-to-desert ---------------------
 
 class ExtrasPanel(Panel):
-    SLOTS = (("afd", 75), ("surf", 30), ("transect", 30))
+    SLOTS = (("afd", 75), ("surf", 30), ("transect", 30), ("aprs", 30), ("aprswx", 30))
 
     @classmethod
     def available(cls, app) -> list[tuple[str, int]]:
         srcs = ((getattr(app, "data", None) or {}).get("sources") or {})
         skip = {k for k in ("afd", "marine") if ((srcs.get(k) or {}).get("data") or {}).get("unsupported")}
-        return [s for s in cls.SLOTS if not (s[0] == "afd" and "afd" in skip or s[0] == "surf" and "marine" in skip)]
+        if not aprs.stations(app):  # APRS off for this location, or nothing heard yet
+            skip |= {"aprs", "aprswx"}
+        elif not any(s.get("wx") for s in aprs.stations(app)):
+            skip.add("aprswx")
+        skip |= {"surf"} if "marine" in skip else set()
+        return [s for s in cls.SLOTS if s[0] not in skip]
 
     def current(self) -> tuple[str, float, int, int]:
         app = self.app
@@ -648,6 +656,12 @@ class ExtrasPanel(Panel):
               f"PEAK {top[1]:.1f}' {top[0].strftime('%a').upper()} {hour_label(top[0])}", t.bright)
         c.put(w - 26, h - 2, "WAVE HEIGHT -12H … +48H", t.dim)
 
+    def _aprs(self, c, t, w, h, el, dots):
+        aprs.draw_heard(self, c, t, w, h, el, dots)
+
+    def _aprswx(self, c, t, w, h, el, dots):
+        aprs.draw_wx(self, c, t, w, h, el, dots)
+
     def _transect(self, c, t, w, h, el, dots):
         tr = self.src("transect") or {}
         pts = tr.get("points") or []
@@ -707,7 +721,7 @@ class ExtrasPanel(Panel):
 
 class StatusBar(Panel):
     WATCH = (("obs", "NWS OBS"), ("forecast", "FORECAST"), ("openmeteo", "OPEN-METEO"), ("radar", "RADAR"),
-             ("tides", "TIDES"), ("marine", "MARINE"), ("afd", "DISCUSSION"))
+             ("tides", "TIDES"), ("marine", "MARINE"), ("afd", "DISCUSSION"), ("aprs", "APRS-IS"))
 
     def draw(self, c, t, w, h):
         app = self.app
@@ -722,16 +736,19 @@ class StatusBar(Panel):
                 {"radar": (getattr(app, "data", None) or {}).get("radar_meta") or {}}
             for key, label in self.WATCH:
                 ent = srcs.get(key) or {}
-                if (ent.get("data") or {}).get("unsupported"):
+                if (ent.get("data") or {}).get("unsupported") or key == "aprs" and not ent:  # APRS off here
                     continue
                 bad = self.stale(key) if key != "radar" else not ent.get("ok_at")
                 s = f"{'○' if bad or ent.get('error') else '●'} {label} {ago(ent.get('ok_at'))}"
                 c.put(x, 0, s, t.warn if bad or ent.get("error") else t.dim)
                 x += len(s) + 3
-        right = (f"{app.loc.upper()} [L]  THEME {app.pal.name} [C]  GIF [G]  SHUFFLE [S]  PAUSE [P]  REFRESH [R]"
-                 "  QUIT [Q]")
+        right = (f"{app.loc.upper()} [L]  THEME {app.pal.name} [C]  APRS {getattr(app, 'aprs_view', 'OFF')} [X]"
+                 "  GIF [G]  SHUFFLE [S]  PAUSE [P]  REFRESH [R]  QUIT [Q]")
         rx = w - len(right) - 1
         msg = getattr(app, "gif_msg", "")
         if msg:
             c.put(rx - len(msg) - 3, 0, f" {msg} ", t.accent)
         c.put(rx, 0, right, t.dim)
+
+
+from . import aprs  # noqa: E402  (last: aprs.py builds on Panel and the helpers above)

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **APRS**, optional and receive-only: set `APRS_CALL` and the home collector listens to APRS-IS around home. `x` draws
+  the stations over the radar loop (all of them, or only weather stations' temperatures), or turns the big map into an
+  APRS map with tracks, range rings (`[` `]`), the latest radar frame and a heard list. Two new rotating panels: APRS
+  HEARD and APRS WEATHER. `wxctl.sh aprs off|wx|all|map`, `APRS_VIEW` first-run setting, APRS state in the MCP
+  `get_status` tool.
+- Collector: `/api/aprs`, and `/api/radar` takes `&last=N` to return only the newest frames.
+- Tests: `pytest` from the repo root (`requirements-dev.txt`).
+
 ## 1.1.0 (2026-11-16)
 
 - Raspberry Pi support, **early testing**: `PROFILE=pi` in `kiosk.conf` (slower animation, four locations by default), and

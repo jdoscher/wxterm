@@ -17,6 +17,15 @@ ADMIN_USERS=
 # The NWS asks every API client to include a contact (email or URL) in its User-Agent
 NWS_CONTACT=
 
+# --- APRS (optional) -----------------------------------------------------------------------------------------
+# Your callsign turns on APRS: stations heard on APRS-IS around home, drawn on the map (key x). Receive-only: the
+# login uses passcode -1, so nothing is ever transmitted or gated. Blank = APRS off.
+APRS_CALL=
+# Locations that connect to APRS-IS (space-separated). Blank = the first one in locations/order (home)
+APRS_LOCATIONS=
+# Filter radius around each location in km (150 covers the radar map)
+APRS_RANGE_KM=150
+
 # --- Hardware profile ---
 # standard: laptops and mini PCs. pi: Raspberry Pi 4/5, early testing (slower animation, four locations by default)
 PROFILE=standard
@@ -34,6 +43,9 @@ START_LOCATION=home
 # change them later and the choice is saved
 THEME=amber
 BIGFONT=segment
+# First-run APRS view (key x changes it and the choice is saved): off, wx (weather stations' temperatures over
+# the radar), all (every station over the radar) or map (the map becomes an APRS map; [ ] zoom)
+APRS_VIEW=all
 # Burn-in guard: shuffle the layout every N minutes (0 = off)
 SHUFFLE_MIN=15
 # GIF frame rate for the g key

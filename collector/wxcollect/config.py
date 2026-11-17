@@ -53,6 +53,15 @@ DATA_DIR = os.environ.get("WX_DATA_DIR", "/data")
 # NWS asks every client to identify itself with a contact (URL or email). Set WX_UA (kiosk.conf: NWS_CONTACT).
 UA = os.environ.get("WX_UA") or "wxterm/1.1 (+https://wxterm.app)"
 
+# APRS stations heard on APRS-IS around home (aprs.py). Receive-only: passcode -1, nothing is ever transmitted.
+# APRS-IS still wants a login name, so set WX_APRS_CALL to your callsign (kiosk.conf APRS_CALL).
+APRS = os.environ.get("WX_APRS", "").strip().lower() in ("1", "yes", "true", "on")
+APRS_CALL = os.environ.get("WX_APRS_CALL", "").strip().upper()
+APRS_SERVER = os.environ.get("WX_APRS_SERVER", "").strip() or "rotate.aprs2.net:14580"
+APRS_RANGE_KM = _opt("WX_APRS_RANGE_KM") or 150.0                   # filter radius; 150 km covers the radar map
+APRS_MAX_AGE_MIN = _opt("WX_APRS_MAX_AGE_MIN") or 60.0              # drop stations not heard for this long
+APRS_FILTER = os.environ.get("WX_APRS_FILTER", "").strip()          # replaces the r/lat/lon/km filter if set
+
 # Shore-to-mountains line for the transect panel, in drawing order (left to right)
 TRANSECT_TITLE = os.environ.get("WX_TRANSECT_TITLE", "SHORE TO CATSKILLS").upper()
 TRANSECT_WATER = os.environ.get("WX_TRANSECT_WATER", "").upper()   # label for the water at the left end, if any

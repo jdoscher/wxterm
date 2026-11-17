@@ -2,7 +2,8 @@
 
 A low-tech, full-screen weather display for the terminal, drawn in ASCII, box-drawing characters and braille line art.
 It shows a live radar loop on a map, current conditions, a 48-hour graph, tides, the moon, a 5-day forecast and the
-forecast discussion, in five vintage phosphor themes. Every data source is free and needs no API key.
+forecast discussion, in five vintage phosphor themes. With a ham callsign it also shows APRS stations heard around
+you, over the radar or on a map of their own. Every data source is free and needs no API key.
 
 It was built for an old ThinkPad (T480, 1920x1080) running as a dedicated kiosk with no desktop. Plug it in and it boots
 straight into the weather. It also runs in any big terminal window.
@@ -21,11 +22,14 @@ straight into the weather. It also runs in any big terminal window.
 ```
 collectors (Docker, one per location, localhost:8091+)  ── JSON ──>  display (Python + Textual, full terminal)
   NWS · Open-Meteo · RainViewer radar · NOAA tides · METAR · sun/moon computed locally
+  APRS-IS (optional, receive-only)
         └── optional MCP server (Docker, LAN :8090, token) ──> your LLM
 ```
 
 ## Features
 - **Radar loop** over a line-drawn map (coast, borders, highways, towns), with 25/50-mile rings and a dBZ legend
+- **APRS** (optional, `x`): stations heard on APRS-IS drawn over the radar loop, APRS weather stations as a surface
+  temperature map, or a dedicated APRS map with tracks and a heard list
 - **Now:** temperature in seven-segment digits, conditions, wind, pressure trend, alerts (US)
 - **48 hours:** temperature and dew point lines with rain-chance bars
 - **Tides and moon:** tide curve with highs and lows, plus moon phase, rise and set, and the next full and new moon
@@ -55,6 +59,8 @@ Use a terminal of at least 160x45. It's designed for 240x62, which is 1920x1080 
 | `l` | next location (always starts on `home` after a restart) |
 | `c` | next theme |
 | `f` | big-digit style: segment, dots (braille LED), blocks |
+| `x` | APRS view: off, wx, all, map (when APRS is on) |
+| `[` `]` | APRS map range: 5, 10, 25, 50, 75 or 100 miles |
 | `g` | save a GIF of one radar loop to `~/gifs` |
 | `s` | shuffle the layout now |
 | `p` | pause the radar loop |
@@ -84,6 +90,10 @@ change `kiosk.conf`. Every setting:
 | `START_LOCATION` | `home` | the location shown after every restart |
 | `THEME` | `amber` | first-run theme; `c` changes it and the choice is saved |
 | `BIGFONT` | `segment` | first-run digit style; `f` changes it |
+| `APRS_CALL` | none | your callsign; turns on APRS (receive-only, see [APRS](#aprs)) |
+| `APRS_LOCATIONS` | first location (`home`) | which locations connect to APRS-IS |
+| `APRS_RANGE_KM` | `150` | APRS-IS filter radius around each of them |
+| `APRS_VIEW` | `all` | first-run APRS view: `off`, `wx`, `all` or `map`; `x` changes it |
 | `SHUFFLE_MIN` | `15` | burn-in shuffle interval in minutes, `0` = off |
 | `GIF_FPS` | `10` | GIF frame rate |
 | `FONT`, `FONT_SIZE` | `DejaVu Sans Mono`, `13` | terminal font (13 px gives 240x62 cells at 1080p) |
@@ -98,7 +108,7 @@ change `kiosk.conf`. Every setting:
 Day to day:
 - `sudo kiosk/mode.sh desktop` (or `kiosk`) switches between the normal desktop and the kiosk, effective at the next
   boot (add `--now` to reboot right away). `mode.sh status` shows the current mode. Ctrl+Alt+F2 opens a console.
-- `scripts/wxctl.sh location sf | theme green | font dots | gif` controls the running display from SSH.
+- `scripts/wxctl.sh location sf | theme green | font dots | aprs map | gif` controls the running display from SSH.
 - `kiosk/capture.sh shot` saves a full-screen PNG and `capture.sh video 30` records 30 s of MP4, both to
   `STATE_DIR/captures`.
 - `scripts/deploy.sh HOST --up`, run from a development checkout, pushes code to the kiosk, rebuilds and restarts
@@ -142,6 +152,27 @@ cities with `LOCATIONS="home nyc paris"` in `kiosk.conf`, then rerun `sudo bash 
 **Not known yet:** CPU load and temperature over days of running, how long `g` takes to encode a GIF (slower than
 on a laptop), and whether a Pi 5 or a 2 GB Pi 4 needs different settings. To go back to a normal console boot:
 `sudo /opt/wxterm/kiosk/mode.sh desktop --now`.
+
+## APRS
+Set `APRS_CALL` to your callsign in `kiosk.conf` and rerun `sudo bash kiosk/setup.sh`. Outside the kiosk, put
+`APRS_CALL=` in `.env` and rerun `python3 scripts/gen-compose.py`. The home collector then holds one connection to
+[APRS-IS](https://www.aprs-is.net) with a range filter around home (`r/LAT/LON/150`). It logs in with passcode `-1`, so
+it's receive-only: nothing is transmitted or gated, and the servers ignore anything it might send.
+
+`x` cycles four views:
+- **OFF**: the plain radar loop.
+- **WX**: temperatures from APRS and CWOP weather stations over the radar, like a surface map.
+- **ALL**: every station over the radar. Each one is a symbol: an arrow along its course for a moving car, `○` when it's parked,
+  `+` a weather station, `◆` a digipeater, `◇` an igate, `Ψ` a repeater, `▪` a home station, `~` a boat and `^` an aircraft.
+  Moving stations trail their last 30 minutes, and callsigns are shown where they fit without covering anything.
+  Stations not heard for 30 minutes are dimmed.
+- **MAP**: the big map becomes an APRS map centred on home, with range rings, an hour of tracks and the latest radar
+  frame underneath. `[` and `]` set the range. On a panel at least 120 columns wide, the heard list sits beside the map, and
+  the last packet heard runs along the bottom border.
+
+Two more panels join the rotating panel: **APRS HEARD** (the most recent stations, with distance, direction and
+comment) and **APRS WEATHER** (nearby weather stations, nearest first, under the official observation). The collector
+drops a station after an hour without a packet and keeps its table on disk, so a restart doesn't begin empty.
 
 ## MCP server (let an LLM read it)
 With `MCP=yes` in `kiosk.conf`, setup runs a small read-only [MCP](https://modelcontextprotocol.io) server in Docker
@@ -214,6 +245,7 @@ skipped. Every `.env` key is documented in `collector/wxcollect/config.py`.
 | Tides, water temperature | [NOAA CO-OPS](https://tidesandcurrents.noaa.gov/api/) | 6 h / 15 min |
 | Sun, golden hour, moon | computed locally with `astral` | |
 | Map lines | [Natural Earth](https://www.naturalearthdata.com) 10m (public domain) | static |
+| APRS stations (optional) | [APRS-IS](https://www.aprs-is.net) via `rotate.aprs2.net`, parsed with aprslib | live |
 | Town names (`new-location.py`) | [GeoNames](https://www.geonames.org) cities over 5,000 people (CC BY 4.0) | static |
 
 RainViewer's free API serves zoom 7 at most and only colour scheme 2, and wxterm decodes that palette back to dBZ.
@@ -221,13 +253,16 @@ Radar tiles are cached on disk, and requests back off on rate limits. Weather da
 data is CC BY 4.0.
 
 ## Development
+- Tests: `pip install -r requirements-dev.txt`, then `pytest` from the repo root (a few seconds, no network: the
+  collector and APRS-IS are faked).
 - `python -m wxterm.snap OUTDIR 240 67 [themes...]` (with `WXTERM_LOCATION=sf`) renders the screen headless to SVG
   and fails if any panel shows an error.
-- Collector API, per location (localhost only): `GET /api/all`, `/api/radar?w=&h=`, `/api/geo`, `/api/refresh`,
-  `/healthz`.
+- Collector API, per location (localhost only): `GET /api/all`, `/api/radar?w=&h=` (optional `&bbox=` and `&last=N`
+  frames), `/api/geo`, `/api/aprs`, `/api/refresh`, `/healthz`.
 - MCP server: `mcp/wxmcp/` (`weather.py` turns collector JSON into summaries, `system.py` reads machine stats,
   `server.py` holds the tools and the auth guard). The display's side is `display/wxterm/remote.py`.
-- Layout: `display/wxterm/app.py`. Panels: `panels.py`. Braille canvas: `canvas.py`. Themes: `themes.py`.
+- Layout: `display/wxterm/app.py`. Panels: `panels.py`, and APRS in `aprs.py` (with the collector side in
+  `collector/wxcollect/aprs.py`). Braille canvas: `canvas.py`. Themes: `themes.py`.
 
 ## License
 MIT. See [LICENSE](LICENSE).

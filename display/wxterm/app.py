@@ -1,4 +1,7 @@
-"""wxterm: full-screen terminal weather display. Talks to one wxterm collector per location (see api.locations())."""
+"""wxterm: full-screen terminal weather display. Talks to one wxterm collector per location (see api.locations()).
+
+APRS stations heard around home can be drawn over the radar loop, or the big map can become an APRS map (`x`, see
+aprs.py)."""
 from __future__ import annotations
 
 import json
@@ -8,9 +11,10 @@ import time
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Container, Horizontal, Vertical
 
-from . import api, gif, glyphs, remote
+from . import api, aprs, gif, glyphs, remote
+from .aprs import AprsPanel
 from .panels import set_tz, DaysPanel, ExtrasPanel, GraphPanel, NowPanel, RadarPanel, StatusBar, TidePanel
 from .themes import THEMES, by_name
 
@@ -24,7 +28,8 @@ class WxApp(App):
     CSS = """
     Screen { layout: vertical; overflow: hidden; }
     #mid { height: 1fr; }
-    #radar { width: 1fr; }
+    #map { width: 1fr; }
+    #radar, #aprsmap { width: 1fr; height: 1fr; }
     #right { width: 88; }
     #now { height: 12; }
     #graph { height: 15; }
@@ -35,7 +40,10 @@ class WxApp(App):
     """
     BINDINGS = [("c", "cycle_theme", "Theme"), ("l", "cycle_location", "Location"), ("p", "pause", "Pause radar"),
                 ("r", "refresh", "Refresh"), ("q", "quit", "Quit"), ("g", "gif", "Save GIF"),
-                ("f", "cycle_font", "Big font"), ("s", "shuffle", "Shuffle layout")]
+                ("f", "cycle_font", "Big font"), ("s", "shuffle", "Shuffle layout"),
+                # APRS: off / weather stations / all stations over the radar loop / the APRS map; [ ] zoom that map
+                ("x", "cycle_aprs", "APRS"), ("left_square_bracket", "aprs_zoom(-1)", "APRS zoom in"),
+                ("right_square_bracket", "aprs_zoom(1)", "APRS zoom out")]
     # Burn-in guard: every SHUFFLE_MIN minutes swap the map side, reorder the sidebar panels and move the status bar,
     # so no border or label sits on the same pixels for hours. 0 turns it off.
     SHUFFLE_MIN = float(os.environ.get("WXTERM_SHUFFLE_MIN", "15"))
@@ -73,6 +81,13 @@ class WxApp(App):
         self.extras_since = time.time()
         self._radar_want: tuple[int, int] | None = None
         self._started = time.time()
+        # APRS: saved choices win, WXTERM_APRS_VIEW (kiosk.conf APRS_VIEW) is the first-run default
+        view = (st.get("aprs_view") or os.environ.get("WXTERM_APRS_VIEW") or "ALL").upper()
+        self.aprs_view = view if view in aprs.VIEWS else "ALL"
+        self.aprs_range = st.get("aprs_range") if st.get("aprs_range") in aprs.RANGES else 25
+        self.aprs: dict | None = None
+        self.aprs_wxgrid: dict | None = None
+        self._aprs_wx_want: tuple | None = None
 
     @property
     def pal(self):
@@ -89,7 +104,9 @@ class WxApp(App):
     # --- layout ---
     def compose(self) -> ComposeResult:
         with Horizontal(id="mid"):
-            yield RadarPanel(id="radar")
+            with Container(id="map"):
+                yield RadarPanel(id="radar")
+                yield AprsPanel(id="aprsmap")
             with Vertical(id="right"):
                 yield NowPanel(id="now")
                 yield GraphPanel(id="graph")
@@ -99,6 +116,7 @@ class WxApp(App):
         yield StatusBar(id="status")
 
     def on_mount(self):
+        self._show_map()
         self._apply_theme()
         self._save_state()  # record the start location so wxctl.sh and the screen agree
         self.action_refresh()
@@ -111,6 +129,8 @@ class WxApp(App):
         self.set_interval(self.TYPE_STEP, self._extras_tick)
         self.set_interval(2, self._watch_state)
         self.set_interval(10, self._write_status)
+        self.set_interval(30, self._fetch_aprs_bg)
+        self.set_interval(300, self.request_aprs_wx)
         if self.SHUFFLE_MIN > 0:
             self.set_interval(self.SHUFFLE_MIN * 60, self.action_shuffle)
 
@@ -133,7 +153,8 @@ class WxApp(App):
             STATE.parent.mkdir(parents=True, exist_ok=True)
             tmp = STATE.with_suffix(".tmp")
             tmp.write_text(json.dumps({"theme": self.pal.name, "location": self.loc, "bigfont": self.bigfont,
-                                       "gif": self._gif_token}))
+                                       "gif": self._gif_token, "aprs_view": self.aprs_view,
+                                       "aprs_range": self.aprs_range}))
             tmp.replace(STATE)
             self._state_mtime = self._mtime()
         except OSError:
@@ -148,7 +169,10 @@ class WxApp(App):
             "cells": [self.size.width, self.size.height],
             "location": self.loc, "theme": self.pal.name, "bigfont": self.bigfont,
             "radar_paused": self.radar_paused, "radar_frames": len(frames), "recording_gif": self._recording,
-            "layout": {"map": "left" if mid.children[0].id == "radar" else "right",
+            "aprs": {"view": self.aprs_view, "range_mi": self.aprs_range, "enabled": aprs.enabled(self),
+                     "stations": len(aprs.stations(self)),
+                     "error": ((self.data or {}).get("sources", {}).get("aprs") or {}).get("error")},
+            "layout": {"map": "left" if mid.children[0].id == "map" else "right",
                        "sidebar": [w.id for w in right.children],
                        "status_bar": "top" if self.screen.children[0].id == "status" else "bottom"},
             "data_error": self.api_error, "shuffle_min": self.SHUFFLE_MIN,
@@ -172,18 +196,20 @@ class WxApp(App):
         if st.get("bigfont") in glyphs.STYLES and st["bigfont"] != self.bigfont:
             self.bigfont = st["bigfont"]
             self.query_one("#now").refresh()
+        if st.get("aprs_view") in aprs.VIEWS and st["aprs_view"] != self.aprs_view:
+            self._set_aprs_view(st["aprs_view"], save=False)
         if st.get("gif") and st.get("gif") != self._gif_token:
             self._gif_token = st["gif"]
             self.action_gif()
 
     def _apply_theme(self):
         self.screen.styles.background = self.pal.bg
-        for w in self.query("#mid, #right, #now, #radar, #graph, #tide, #days, #extras, #status"):
+        for w in self.query("#mid, #map, #right, #now, #radar, #aprsmap, #graph, #tide, #days, #extras, #status"):
             w.styles.background = self.pal.bg
         self.refresh_all()
 
     def refresh_all(self):
-        for w in self.query("#now, #radar, #graph, #tide, #days, #extras, #status"):
+        for w in self.query("#now, #radar, #aprsmap, #graph, #tide, #days, #extras, #status"):
             w.refresh()
 
     # --- actions ---
@@ -207,18 +233,18 @@ class WxApp(App):
             order = list(self.SIDEBAR)
             random.shuffle(order)
             map_left, status_top = random.random() < 0.5, random.random() < 0.5
-            sig = ("radar" if map_left else "right", tuple(o[1:] for o in order), "status" if status_top else "mid")
+            sig = ("map" if map_left else "right", tuple(o[1:] for o in order), "status" if status_top else "mid")
             if sig != before:
                 break
         widgets = [self.query_one(sel) for sel in order]
         for i, w in enumerate(widgets):
             if right.children[i] is not w:
                 right.move_child(w, before=i)
-        radar = self.query_one("#radar")
-        if map_left and mid.children[0] is not radar:
-            mid.move_child(radar, before=0)
-        elif not map_left and mid.children[0] is radar:
-            mid.move_child(radar, after=right)
+        mp = self.query_one("#map")
+        if map_left and mid.children[0] is not mp:
+            mid.move_child(mp, before=0)
+        elif not map_left and mid.children[0] is mp:
+            mid.move_child(mp, after=right)
         status = self.query_one("#status")
         if status_top and self.screen.children[0] is not status:
             self.screen.move_child(status, before=0)
@@ -245,11 +271,13 @@ class WxApp(App):
             return
         frames = len((self.radar or {}).get("frames") or []) or 13
         seconds = (frames + 8) * self.RADAR_STEP + 0.4   # every frame plus the hold on the latest = one clean loop
+        if self.aprs_view == "MAP":
+            seconds = 10.0                    # no loop to follow on the APRS map
         self.radar_idx, self.radar_hold, self.radar_paused = 0, 0, False
         self._recording = True
         self.gif_msg = ""  # keep the status bar clean while recording
         self.query_one("#status").refresh()
-        name = self.loc
+        name = self.loc + ("-aprs" if self.aprs_view == "MAP" else "")
 
         def work():
             try:
@@ -271,6 +299,7 @@ class WxApp(App):
         base = self.base
         self.run_worker(lambda: api.get(base, "/api/refresh", timeout=5), thread=True, group="wake")
         self.data = self.radar = self.geo = None
+        self.aprs = self.aprs_wxgrid = None
         self.api_error = None
         self.radar_idx = 0
         if save:
@@ -285,6 +314,87 @@ class WxApp(App):
     def action_refresh(self):
         self._fetch_all_bg()
         self.request_radar()
+        self._fetch_aprs_bg()
+        self.request_aprs_wx()
+
+    # --- APRS ---
+    def _show_map(self):
+        on = self.aprs_view == "MAP"
+        self.query_one("#radar").display = not on
+        self.query_one("#aprsmap").display = on
+
+    def action_cycle_aprs(self):
+        self._set_aprs_view(aprs.VIEWS[(aprs.VIEWS.index(self.aprs_view) + 1) % len(aprs.VIEWS)])
+
+    def _set_aprs_view(self, view: str, save: bool = True):
+        self.aprs_view = view
+        self._show_map()
+        if save:
+            self._save_state()
+        # sizes settle after the next layout, so ask for data then
+        self.call_after_refresh(self.request_aprs_wx if view == "MAP" else self.request_radar)
+        self.call_after_refresh(self._fetch_aprs_bg)
+        self.refresh_all()
+
+    def action_aprs_zoom(self, step: int):
+        i = aprs.RANGES.index(self.aprs_range) if self.aprs_range in aprs.RANGES else 2
+        rng = aprs.RANGES[max(0, min(len(aprs.RANGES) - 1, i + step))]
+        if rng != self.aprs_range:
+            self.aprs_range = rng
+            self._save_state()
+            self.request_aprs_wx()
+            self.query_one("#aprsmap").refresh()
+
+    def check_action(self, action: str, parameters) -> bool | None:
+        """[ and ] only zoom the APRS map."""
+        if action == "aprs_zoom":
+            return self.aprs_view == "MAP"
+        return True
+
+    def _fetch_aprs_bg(self):
+        if aprs.enabled(self):  # even with the view OFF: the APRS extras slots read it too
+            self.run_worker(self._fetch_aprs, thread=True, group="aprs", exclusive=True)
+
+    def _fetch_aprs(self):
+        base = self.base
+        try:
+            j = api.get(base, "/api/aprs")
+        except Exception:  # noqa: BLE001 - shown as stale in the status bar; asked again in 30 s
+            return
+        self.call_from_thread(self._set_aprs, base, j)
+
+    def _set_aprs(self, base, j):
+        if base != self.base:
+            return
+        self.aprs = j if j.get("enabled") else None
+        for sel in ("#radar", "#aprsmap"):
+            self.query_one(sel).refresh()
+
+    def request_aprs_wx(self):
+        """The latest radar frame, sampled to the APRS map's box, for the rain under the stations."""
+        if self.aprs_view != "MAP" or not self.geo:
+            return
+        panel = self.query_one(AprsPanel)
+        if panel.size.width < 10:
+            return
+        w, h, _ = panel.view()
+        bbox = panel.bbox(self.geo["home"])
+        want = (w, h, self.aprs_range, self.base)
+        self._aprs_wx_want = want
+        q = f"/api/radar?w={w}&h={h}&last=1&bbox=" + ",".join(f"{v:.5f}" for v in bbox)
+        self.run_worker(lambda: self._fetch_aprs_wx(want, q), thread=True, group="aprswx", exclusive=True)
+
+    def _fetch_aprs_wx(self, want, q):
+        try:
+            r = api.get(want[3], q, timeout=60)
+        except Exception:  # noqa: BLE001 - the stations still show; tried again in 5 minutes or on zoom
+            return
+        self.call_from_thread(self._set_aprs_wx, want, r)
+
+    def _set_aprs_wx(self, want, r):
+        if want == self._aprs_wx_want:
+            self.aprs_wxgrid = r
+            self.query_one("#aprsmap").refresh()
 
     # --- network (threads) ---
     def _fetch_all_bg(self):
@@ -305,7 +415,10 @@ class WxApp(App):
             return
         if d is not None:
             set_tz((d.get("home") or {}).get("tz"))
+            first = self.data is None
             self.data = d
+            if first:  # now we know whether this location has APRS
+                self._fetch_aprs_bg()
         self.api_error = err
         self.refresh_all()
 
@@ -313,14 +426,22 @@ class WxApp(App):
         base = self.base
         try:
             g = api.get(base, "/api/geo")
-            self.call_from_thread(lambda: setattr(self, "geo", g) if base == self.base else None)
+            self.call_from_thread(self._set_geo, base, g)
         except Exception:  # noqa: BLE001 - retried on next refresh
             pass
 
+    def _set_geo(self, base, g):
+        if base == self.base:
+            self.geo = g
+            self.request_aprs_wx()
+
     def request_radar(self):
         try:
-            w, h = self.query_one(RadarPanel).dot_size()
+            panel = self.query_one(RadarPanel)
+            w, h = panel.dot_size()
         except Exception:  # noqa: BLE001 - not mounted yet
+            return
+        if not panel.display:  # the APRS map is up; asked again when the radar map comes back
             return
         self._radar_want = (w, h)
         base = self.base
@@ -357,7 +478,7 @@ class WxApp(App):
 
     def _radar_tick(self):
         frames = (self.radar or {}).get("frames") or []
-        if not frames or self.radar_paused:
+        if not frames or self.radar_paused or self.aprs_view == "MAP":
             return
         if self.radar_idx >= len(frames) - 1:
             self.radar_hold += 1

@@ -127,7 +127,7 @@ async def get_status() -> dict:
             "running": bool(beat and time.time() - beat < 60),
             "location": st.get("location"), "theme": (st.get("theme") or "").lower() or None,
             "digit_style": st.get("bigfont"), "terminal_cells": st.get("cells"), "layout": st.get("layout"),
-            "radar_paused": st.get("radar_paused"), "recording_gif": st.get("recording_gif"),
+            "radar_paused": st.get("radar_paused"), "recording_gif": st.get("recording_gif"), "aprs": st.get("aprs"),
             "burn_in_shuffle_min": st.get("shuffle_min"), "data_error": st.get("data_error"),
             "uptime_hours": round((time.time() - st["started"]) / 3600, 1) if st.get("started") else None,
         }

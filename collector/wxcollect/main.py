@@ -1,8 +1,9 @@
 """wxcollect: poll free weather sources on a schedule, cache the last good result, serve JSON on :8091.
 
 GET /api/all            everything except radar, with per-source fetched/ok/error times
-GET /api/radar?w=&h=    radar level grids for a w x h dot map (optional &bbox=lon0,lon1,lat0,lat1)
+GET /api/radar?w=&h=    radar level grids for a w x h dot map (optional &bbox=lon0,lon1,lat0,lat1, &last=N frames)
 GET /api/geo            coastline/border/roads/lakes polylines, town labels, home point
+GET /api/aprs           APRS stations heard on APRS-IS around home (positions, symbols, tracks, weather)
 GET /healthz
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import config, sources, world
+from . import aprs, config, sources, world
 from .radar import Radar, bbox_for
 
 log = logging.getLogger("wxcollect")
@@ -45,6 +46,8 @@ JOBS = {  # name: (function, interval seconds before WX_POLL_SCALE)
     "water_temp": (sources.fetch_water_temp, 900),
     "radar": (RADAR.refresh, 300),
 }
+if config.APRS:  # the APRS-IS connection is its own thread (aprs.start); this job publishes its status
+    JOBS["aprs"] = (aprs.summary, 30)
 WAKE = {name: threading.Event() for name in JOBS}  # set by /api/refresh to run a job now
 _last_refresh = 0.0
 
@@ -75,6 +78,8 @@ def load():
             log.info("cache is for another location; starting fresh")
             return
         STORE.update(saved)
+        if not config.APRS:  # APRS was on last run, not now
+            STORE.pop("aprs", None)
         log.info("loaded cache: %s", ", ".join(STORE))
     except (OSError, ValueError):
         pass
@@ -166,7 +171,9 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/radar":
                 w, h = int(q.get("w", 240)), int(q.get("h", 152))
                 bbox = [float(x) for x in q["bbox"].split(",")] if "bbox" in q else bbox_for(w, h)
-                return self._send(RADAR.grid(w, h, bbox))
+                return self._send(RADAR.grid(w, h, bbox, last=int(q.get("last", 0))))
+            if u.path == "/api/aprs":
+                return self._send(aprs.snapshot() if config.APRS else {"enabled": False, "stations": []})
             if u.path == "/api/geo":
                 return self._send(GEO | {"towns": config.TOWNS, "home": [config.LAT, config.LON],
                                          "span_lon": config.MAP_SPAN_LON})
@@ -179,6 +186,10 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     load()
+    if config.APRS:
+        # listed in /api/all from the first request, so the display knows APRS is on while it connects
+        STORE.setdefault("aprs", {"data": None, "ok_at": None, "error": "connecting", "interval": 30})
+        aprs.start()
     for name in JOBS:
         threading.Thread(target=run_job, args=(name,), daemon=True, name=name).start()
     srv = ThreadingHTTPServer(("0.0.0.0", config.PORT), Handler)

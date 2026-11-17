@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import make_geo  # noqa: E402
 
-UA = {"User-Agent": os.environ.get("WX_UA") or "wxterm/1.1 (+https://wxterm.app)"}
+UA = {"User-Agent": os.environ.get("WX_UA") or "wxterm/1.2 (+https://wxterm.app)"}
 SPAN_LON = 2.6       # matches the collector's WX_MAP_SPAN_LON default
 MAP_ASPECT = 0.855   # map panel dot height / width at 240x67 cells
 

@@ -114,6 +114,7 @@
   .chat .a { color: var(--fg); padding-left: 2ch; }
   .chat .tool { color: var(--dim); font-size: 13px; padding-left: 2ch; }
 
+  .cols > * { min-width: 0; }   /* let a long command scroll inside its pre instead of widening the page */
   .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 26px 22px; }
   .gallery figure { margin: 0; }
   .gallery figcaption { font-size: 13px; color: var(--dim); margin-top: 6px; }
@@ -138,10 +139,10 @@
 <body data-theme="amber">
 
 <div class="bar"><div class="wrap">
-  <b>WXTERM</b><span class="dot">v1.1</span>
+  <b>WXTERM</b><span class="dot">v1.2</span>
   <span class="dot" id="themeName">AMBER</span>
   <nav aria-label="Sections">
-    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#kiosk">Kiosk</a><a href="#pi">Pi</a><a href="#mcp">MCP</a><a href="#data">Data</a>
+    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#air">Air</a><a href="#kiosk">Kiosk</a><a href="#pi">Pi</a><a href="#mcp">MCP</a><a href="#data">Data</a>
     <a href="https://github.com/jdoscher/wxterm">GitHub</a>
   </nav>
 </div></div>
@@ -150,10 +151,12 @@
   <header class="hero">
     <div>
       <h1>Weather, drawn in text.</h1>
-      <p class="lede">wxterm is a full-screen terminal weather display: a live radar loop over a line-drawn map,
-        conditions, a 48-hour graph, tides, the moon and the forecast, in ASCII, box-drawing and braille.
+      <p class="lede">wxterm is a full-screen terminal weather display: a live radar loop and live air traffic over
+        a line-drawn map, conditions, a 48-hour graph, tides, the moon and the forecast, in ASCII, box-drawing and
+        braille.
         It runs on an old laptop as a kiosk with no desktop, or in any big terminal window.</p>
-      <p class="newline">New in 1.1: <a href="#pi">Raspberry Pi 4 and 5 support</a>, in early testing.</p>
+      <p class="newline">New in 1.2: <a href="#air">live air traffic on the map</a>, contributed by Justin Van Bibber.
+        Still in early testing from 1.1: <a href="#pi">Raspberry Pi 4 and 5 support</a>.</p>
     </div>
     <div class="hero-actions">
       <a class="btn" href="https://github.com/jdoscher/wxterm">GitHub&nbsp;→</a>
@@ -181,11 +184,12 @@
       <div>
         <h2>What's on the screen</h2>
         <dl class="spec">
-          <dt>Radar</dt><dd>The last two hours of radar, looping over coastlines, borders, highways and towns, with 25 and 50 mile rings.</dd>
+          <dt>Radar</dt><dd>The last two hours of radar, looping over coastlines, borders, highways, towns and airports, with range rings. Zoom from 5 to 100 nautical miles.</dd>
           <dt>Now</dt><dd>Temperature in seven-segment digits, feels-like, wind, humidity, pressure trend, and any alerts.</dd>
           <dt>48 hours</dt><dd>Temperature and dew point as braille line plots over rain-chance bars.</dd>
           <dt>Tide · moon</dt><dd>The tide curve through tomorrow with every high and low, plus the moon phase, rise and set.</dd>
           <dt>5-day</dt><dd>Highs, lows, rain chance and a few words for each day.</dd>
+          <dt>Air traffic</dt><dd>One key puts live flights on the map: aircraft as arrows with trails and data tags, runways, and the radar loop still running underneath. Contributed by Justin Van Bibber.</dd>
           <dt>Rotating</dt><dd>A panel that cycles between the forecaster's discussion, typed out like a teletype, the surf, and temperatures from the coast inland.</dd>
         </dl>
       </div>
@@ -193,6 +197,7 @@
         <h2>Small touches</h2>
         <dl class="spec">
           <dt><kbd>l</kbd></dt><dd>Next location. Ten are built in: yours plus nine demo cities from San Francisco to Tokyo.</dd>
+          <dt><kbd>w</kbd> <kbd>a</kbd></dt><dd>Radar and air traffic, each on or off. <kbd>+</kbd> <kbd>-</kbd> change the range, <kbd>Tab</kbd> picks a flight, <kbd>t</kbd> cycles the data tags.</dd>
           <dt><kbd>g</kbd></dt><dd>Record exactly one radar loop as a GIF. Every GIF on this page was made that way.</dd>
           <dt><kbd>f</kbd></dt><dd>Big digits as segments, braille dots or blocks.</dd>
           <dt><kbd>s</kbd></dt><dd>Shuffle the layout. It also happens every 15 minutes, so nothing burns in.</dd>
@@ -223,6 +228,25 @@
           forecast discussion are NWS products, so those panels are skipped.</p>
       </div>
     </div>
+  </section>
+
+  <section id="air">
+    <h2>Air traffic</h2>
+    <p>Press <kbd>a</kbd> and live flights cross the map, through the radar loop if it's on. Each aircraft is an arrow
+      along its track with a braille trail and a data tag: callsign, type, route, altitude with climb or descent, and
+      ground speed. A traffic list beside the map shows everything in view, nearest first, and <kbd>Tab</kbd> picks a
+      flight for its details. <kbd>w</kbd> turns the radar off for just the sky, and <kbd>+</kbd> <kbd>-</kbd> zoom
+      both.</p>
+    <div class="screen">
+      <span class="t">Radar + air traffic · Paris</span>
+      <span class="t t2">25 NM · colour</span>
+      <img loading="lazy" src="air-paris-color.png" width="1920" height="1080"
+           alt="wxterm in colour over Paris: rain on the radar map with aircraft arrows and data tags around Charles de Gaulle and Orly, and a traffic list beside the map">
+    </div>
+    <p>The flight tracker is the work of <a href="https://github.com/notjvb">Justin Van Bibber</a>, who ported
+      AsciiFlights onto wxterm's map. Thanks, Justin. Aircraft come from the free
+      <a href="https://github.com/adsbfi/opendata">adsb.fi</a> feed and are fetched only while air traffic is on.
+      It's off by default; <code>AIR=on</code> in <code>kiosk.conf</code> turns it on at first start.</p>
   </section>
 
   <section id="kiosk">
@@ -320,7 +344,8 @@
         <tr><td>Tides</td><td><a href="https://tidesandcurrents.noaa.gov/api/">NOAA CO-OPS</a>, or Open-Meteo's sea-level model where there's no gauge</td></tr>
         <tr><td>Surf</td><td>Open-Meteo marine</td></tr>
         <tr><td>Sun · moon</td><td>Computed locally</td></tr>
-        <tr><td>Maps</td><td><a href="https://www.naturalearthdata.com">Natural Earth</a> (public domain) and <a href="https://www.geonames.org">GeoNames</a> town names</td></tr>
+        <tr><td>Aircraft</td><td><a href="https://github.com/adsbfi/opendata">adsb.fi</a> open data, with <a href="https://api.adsb.lol">adsb.lol</a> as a fallback; routes from <a href="https://www.adsbdb.com">adsbdb</a></td></tr>
+        <tr><td>Maps</td><td><a href="https://www.naturalearthdata.com">Natural Earth</a> (public domain), <a href="https://ourairports.com/data/">OurAirports</a> runways and <a href="https://www.geonames.org">GeoNames</a> town names</td></tr>
       </tbody>
     </table>
   </section>
@@ -337,7 +362,7 @@
 </main>
 
 <footer><div class="wrap">
-  <span>wxterm 1.1 · MIT license · by Jay Doscher</span>
+  <span>wxterm 1.2 · MIT license · by Jay Doscher · air traffic by <a href="https://github.com/notjvb">Justin Van Bibber</a></span>
   <a href="https://github.com/jdoscher/wxterm">Source on GitHub</a>
   <a href="https://github.com/jdoscher/wxterm/issues">Issues</a>
   <span>Weather data © NWS, NOAA, Open-Meteo (CC BY 4.0), RainViewer, aviationweather.gov</span>

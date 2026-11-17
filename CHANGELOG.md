@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0 (2026-11-17)
+
+- **Air traffic**, contributed by [Justin Van Bibber](https://github.com/notjvb) (thanks, Justin): live ADS-B aircraft from adsb.fi (adsb.lol as a fallback) with
+  trails, data tags, routes from adsbdb, runways and airport codes from OurAirports, a traffic list and the selected
+  flight's details.
+- **One map, two layers.** The radar loop (`w`) and air traffic (`a`) switch on and off on their own, over one map
+  centred on home. `+` and `-` change the range (5 to 100 NM, 40 to start) for both, and the radar is sampled for
+  the range on screen, so zooming in shows finer rain.
+- `AIR` in `kiosk.conf` (off by default), and `scripts/wxctl.sh air on|off`, `radar on|off`, `range NM` and
+  `tags auto|all|off`.
+- Map labels keep a space between them, so neighbouring airport codes no longer run together.
+- The MCP server's `get_status` reports the map's layers and range.
+- Tests: `pip install -r requirements-dev.txt`, then `pytest`.
+
 ## 1.1.0 (2026-11-16)
 
 - Raspberry Pi support, **early testing**: `PROFILE=pi` in `kiosk.conf` (slower animation, four locations by default), and

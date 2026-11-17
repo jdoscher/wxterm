@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Control the running display from any shell on the host (the display polls its state file every 2 s).
 #   scripts/wxctl.sh location sf      scripts/wxctl.sh theme green      scripts/wxctl.sh font dots|segment|blocks
+#   scripts/wxctl.sh air on|off       (air traffic on the map, same as pressing a)
+#   scripts/wxctl.sh radar on|off     (the radar loop on the map, same as pressing w)
+#   scripts/wxctl.sh range 25         (5, 10, 15, 25, 40, 60 or 100 NM, like + and -)
+#   scripts/wxctl.sh tags all         (air traffic data tags: auto, all or off, like t)
 #   scripts/wxctl.sh gif              (records one radar loop to ~/gifs, same as pressing g)
 set -euo pipefail
 . "$(dirname "$0")/../kiosk/lib.sh"
 state="${WXTERM_STATE:-$STATE_DIR/state.json}"
 [[ -e "$state" || -w "$(dirname "$state")" ]] || state="$HOME/.config/wxterm/state.json"
-cmd="${1:?usage: wxctl.sh location NAME | theme NAME | font NAME | gif | mcp}"
+cmd="${1:?usage: wxctl.sh location NAME | theme NAME | font NAME | air on|off | radar on|off | range NM | tags MODE | gif | mcp}"
 val="${2:-}"
 if [[ "$cmd" == mcp ]]; then   # print how to connect an LLM client to the MCP server
   envf="$WXTERM_DIR/.env"
@@ -43,6 +47,18 @@ elif cmd == "theme":
     st["theme"] = val.upper()
 elif cmd == "font":
     st["bigfont"] = val.lower()
+elif cmd in ("air", "radar"):
+    if val.lower() not in ("on", "off"):
+        sys.exit(f"{cmd}: on or off")
+    st[cmd] = val.lower() == "on"
+elif cmd == "range":
+    if val not in ("5", "10", "15", "25", "40", "60", "100"):
+        sys.exit("range: 5, 10, 15, 25, 40, 60 or 100")
+    st["air_range"] = int(val)
+elif cmd == "tags":
+    if val.lower() not in ("auto", "all", "off"):
+        sys.exit("tags: auto, all or off")
+    st["air_tags"] = val.upper()
 elif cmd == "gif":
     st["gif"] = str(time.time())
 else:

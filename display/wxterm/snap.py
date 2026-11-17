@@ -1,4 +1,6 @@
-"""Render the screen headless at a given size and save an SVG per theme. Usage: python -m wxterm.snap OUTDIR [W H]"""
+"""Render the screen headless at a given size and save an SVG per theme. Usage: python -m wxterm.snap OUTDIR [W H]
+
+WXTERM_AIR=on adds air traffic to the map."""
 from __future__ import annotations
 
 import asyncio
@@ -16,17 +18,21 @@ from .themes import THEMES  # noqa: E402
 async def run(out: str, w: int, h: int, themes: list[str]):
     app = WxApp()
     async with app.run_test(size=(w, h)) as pilot:
-        for _ in range(60):  # wait for data + radar
+        for _ in range(60):  # wait for data + radar (or traffic)
             await pilot.pause(0.5)
-            if app.data and app.radar and app.geo:
+            if app.data and app.geo and app.radar and (app.traffic.ok_at or not app.air_on):
                 break
+        if app.air_on:
+            await pilot.pause(3)  # a second poll gives trails, routes arrive, and data tags settle
         app.radar_paused = True
         app.radar_idx = len((app.radar or {}).get("frames") or [1]) - 1
         bad = []
         for k in range(3):  # every rotating extras slot, every panel: no ERROR boxes
             app.extras_idx = k
             await pilot.pause(0.3)
-            for wdg in app.query("#now, #radar, #graph, #tide, #days, #extras, #status"):
+            for wdg in app.query("#now, #mapview, #graph, #tide, #days, #extras, #status"):
+                if not wdg.display:
+                    continue
                 txt = str(wdg.render())
                 if "ERROR" in txt[:400]:
                     bad.append((k, wdg.id, txt[:300]))
@@ -39,7 +45,7 @@ async def run(out: str, w: int, h: int, themes: list[str]):
             app.extras_since -= 20
             app._apply_theme()
             await pilot.pause(0.6)
-            app.save_screenshot(f"{app.loc}-{th.name.lower()}.svg", out)
+            app.save_screenshot(f"{app.loc}{'-air' if app.air_on else ''}-{th.name.lower()}.svg", out)
             print("saved", app.loc, th.name)
 
 

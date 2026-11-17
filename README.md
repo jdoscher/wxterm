@@ -2,7 +2,8 @@
 
 A low-tech, full-screen weather display for the terminal, drawn in ASCII, box-drawing characters and braille line art.
 It shows a live radar loop on a map, current conditions, a 48-hour graph, tides, the moon, a 5-day forecast and the
-forecast discussion, in five vintage phosphor themes. Every data source is free and needs no API key.
+forecast discussion, in five vintage phosphor themes. One key adds live air traffic to the map. Every data source is
+free and needs no API key.
 
 It was built for an old ThinkPad (T480, 1920x1080) running as a dedicated kiosk with no desktop. Plug it in and it boots
 straight into the weather. It also runs in any big terminal window.
@@ -21,11 +22,16 @@ straight into the weather. It also runs in any big terminal window.
 ```
 collectors (Docker, one per location, localhost:8091+)  ── JSON ──>  display (Python + Textual, full terminal)
   NWS · Open-Meteo · RainViewer radar · NOAA tides · METAR · sun/moon computed locally
+  adsb.fi / adsb.lol aircraft · adsbdb routes (only while air traffic is on)
         └── optional MCP server (Docker, LAN :8090, token) ──> your LLM
 ```
 
 ## Features
-- **Radar loop** over a line-drawn map (coast, borders, highways, towns), with 25/50-mile rings and a dBZ legend
+- **One map, two layers.** The map (coast, borders, highways, towns, runways and airport codes) is centred on home
+  with range rings, from 5 to 100 NM. The **radar loop** (`w`) and live **air traffic** (`a`) each switch on and off
+  on their own: rain only, planes flying through the rain, or the bare map.
+- **Air traffic** (contributed by [Justin Van Bibber](https://github.com/notjvb)): live ADS-B aircraft as arrows with
+  trails and data tags, a traffic list and the selected flight's details
 - **Now:** temperature in seven-segment digits, conditions, wind, pressure trend, alerts (US)
 - **48 hours:** temperature and dew point lines with rain-chance bars
 - **Tides and moon:** tide curve with highs and lows, plus moon phase, rise and set, and the next full and new moon
@@ -55,11 +61,22 @@ Use a terminal of at least 160x45. It's designed for 240x62, which is 1920x1080 
 | `l` | next location (always starts on `home` after a restart) |
 | `c` | next theme |
 | `f` | big-digit style: segment, dots (braille LED), blocks |
-| `g` | save a GIF of one radar loop to `~/gifs` |
+| `w` | radar loop on/off |
+| `a` | air traffic on/off |
+| `+` `-` | range: 5, 10, 15, 25, 40, 60 or 100 NM from home to the nearest edge (40 to start) |
+| `g` | save a GIF of one radar loop (10 s with the radar off) to `~/gifs` |
 | `s` | shuffle the layout now |
 | `p` | pause the radar loop |
 | `r` | refresh now |
 | `q` | quit |
+
+With air traffic on:
+
+| Key | |
+|---|---|
+| `Tab` `Shift+Tab` | select the next or previous aircraft (nearest first); a click selects one too |
+| `Esc` | clear the selection |
+| `t` | data tags: auto, all, off |
 
 ## Kiosk setup (Debian or Ubuntu, tested on Debian 13)
 ```bash
@@ -84,6 +101,7 @@ change `kiosk.conf`. Every setting:
 | `START_LOCATION` | `home` | the location shown after every restart |
 | `THEME` | `amber` | first-run theme; `c` changes it and the choice is saved |
 | `BIGFONT` | `segment` | first-run digit style; `f` changes it |
+| `AIR` | `off` | first-run air traffic: `on` or `off` (it polls the ADS-B feeds every 2.5 s while on); `a` changes it |
 | `SHUFFLE_MIN` | `15` | burn-in shuffle interval in minutes, `0` = off |
 | `GIF_FPS` | `10` | GIF frame rate |
 | `FONT`, `FONT_SIZE` | `DejaVu Sans Mono`, `13` | terminal font (13 px gives 240x62 cells at 1080p) |
@@ -98,7 +116,8 @@ change `kiosk.conf`. Every setting:
 Day to day:
 - `sudo kiosk/mode.sh desktop` (or `kiosk`) switches between the normal desktop and the kiosk, effective at the next
   boot (add `--now` to reboot right away). `mode.sh status` shows the current mode. Ctrl+Alt+F2 opens a console.
-- `scripts/wxctl.sh location sf | theme green | font dots | gif` controls the running display from SSH.
+- `scripts/wxctl.sh location sf | theme green | font dots | air on | radar off | range 25 | tags all | gif` controls
+  the running display from SSH.
 - `kiosk/capture.sh shot` saves a full-screen PNG and `capture.sh video 30` records 30 s of MP4, both to
   `STATE_DIR/captures`.
 - `scripts/deploy.sh HOST --up`, run from a development checkout, pushes code to the kiosk, rebuilds and restarts
@@ -143,6 +162,38 @@ cities with `LOCATIONS="home nyc paris"` in `kiosk.conf`, then rerun `sudo bash 
 on a laptop), and whether a Pi 5 or a 2 GB Pi 4 needs different settings. To go back to a normal console boot:
 `sudo /opt/wxterm/kiosk/mode.sh desktop --now`.
 
+## Air traffic
+Press `a` and live aircraft fly over the map, through the rain if the radar is on.
+
+> **Hat tip:** the flight tracker is the work of [Justin Van Bibber](https://github.com/notjvb), who ported
+> AsciiFlights, a flight tracker for the browser drawn in text, onto wxterm's terminal and map. Thanks, Justin.
+
+![Radar and air traffic over Paris at 25 NM, colour, with data tags on and rain across the map](docs/air-paris-color.png)
+
+- **Aircraft** are arrows pointing along their track, with a 90-second braille trail. Parked aircraft are dimmed, and
+  emergency squawks (7500, 7600, 7700) blink. Between polls (every 2.5 s) each position is dead-reckoned from its
+  speed and track, so traffic moves smoothly.
+- **The map** is the same one the radar uses. With both layers on, the radar loop keeps running under the traffic,
+  drawn a little lighter so the aircraft stand out, and you can see who's flying around the storms. Aircraft draw over
+  map labels: where a plane is matters more than the label it covers for a moment.
+- **Data tags** show callsign, type, route (or registration), altitude with climb ▲ or descent ▼, and ground speed,
+  on a leader line placed so tags don't overlap. `t` cycles the modes. AUTO shows a tag on (nearly) every airborne
+  aircraft while they fit; when the sky is too busy for the range, it shows only the selected one and the map's
+  top border says TAGS BUSY. ALL
+  shows as many as fit, and OFF shows only the selected one.
+- **Beside the map**, when the panel is at least 120 columns wide: the traffic list (nearest first, ground last) and
+  the selected aircraft's details, including operator, route, vertical rate, selected altitude, distance and bearing
+  from home, and an altitude profile.
+- **Routes** come from adsbdb by callsign, and they go stale: schedules change and callsigns get reused. A route is
+  shown only if the aircraft is near the line between its endpoints and, away from both airports, heading toward
+  the destination. Otherwise the details panel says the route on file doesn't fit.
+
+The collector fetches aircraft only while air traffic is on, with at most one request a second to
+adsb.fi (its limit for free use) and a 1.5 s cache, falling back to adsb.lol if adsb.fi fails. Airports and runways
+come from OurAirports; `new-location.py` adds them to new locations. To add them to a location made before this
+feature, run `python3 scripts/make_geo.py --add-airports locations/home.geo.json` and restart its collector. Without
+them the map still works, just without runways.
+
 ## MCP server (let an LLM read it)
 With `MCP=yes` in `kiosk.conf`, setup runs a small read-only [MCP](https://modelcontextprotocol.io) server in Docker
 at `http://KIOSK:8090/mcp`. Ask your assistant "is rain heading my way?", "when's the next high tide?" or "is the
@@ -182,7 +233,7 @@ the machine through MCP.** Security:
 `locations/order` lists the locations in toggle order, each with the host port of its collector. A location is used
 when its `locations/<name>.env` exists. `scripts/new-location.py NAME LAT LON` creates one: it looks up the timezone,
 the NWS office and station (or the nearest airport METAR outside the US), the nearest NOAA tide and water-temperature
-stations (or open water for model tides), surf, map labels and a transect. It then writes the map lines, adds the
+stations (or open water for model tides), surf, map labels, airports and a transect. It then writes the map lines, adds the
 location to `order` and regenerates `docker-compose.yml`. `home` is gitignored, so your own location stays out of git.
 
 | Name | Data | Notes |
@@ -214,20 +265,28 @@ skipped. Every `.env` key is documented in `collector/wxcollect/config.py`.
 | Tides, water temperature | [NOAA CO-OPS](https://tidesandcurrents.noaa.gov/api/) | 6 h / 15 min |
 | Sun, golden hour, moon | computed locally with `astral` | |
 | Map lines | [Natural Earth](https://www.naturalearthdata.com) 10m (public domain) | static |
+| Airports and runways | [OurAirports](https://ourairports.com/data/) (public domain) | static |
+| Aircraft (air traffic) | [adsb.fi open data](https://github.com/adsbfi/opendata), [adsb.lol](https://api.adsb.lol) as a fallback | 2.5 s, only while air traffic is on |
+| Flight routes | [adsbdb](https://www.adsbdb.com) | on demand, cached 6 h |
 | Town names (`new-location.py`) | [GeoNames](https://www.geonames.org) cities over 5,000 people (CC BY 4.0) | static |
 
-RainViewer's free API serves zoom 7 at most and only colour scheme 2, and wxterm decodes that palette back to dBZ.
+adsb.fi's open data is free for personal, non-commercial use. RainViewer's free API serves zoom 7 at most and only
+colour scheme 2, and wxterm decodes that palette back to dBZ.
 Radar tiles are cached on disk, and requests back off on rate limits. Weather data © the providers above. Open-Meteo
 data is CC BY 4.0.
 
 ## Development
+- Tests: `pip install -r requirements-dev.txt`, then `pytest` from the repo root (about 20 s, no network: the
+  collector and the feeds are faked). They cover the map's layers and air traffic from the collector's lookups
+  through to the keys and what reaches the screen.
 - `python -m wxterm.snap OUTDIR 240 67 [themes...]` (with `WXTERM_LOCATION=sf`) renders the screen headless to SVG
-  and fails if any panel shows an error.
-- Collector API, per location (localhost only): `GET /api/all`, `/api/radar?w=&h=`, `/api/geo`, `/api/refresh`,
-  `/healthz`.
+  and fails if any panel shows an error. `WXTERM_AIR=on` adds air traffic to the map.
+- Collector API, per location (localhost only): `GET /api/all`, `/api/radar?w=&h=` (optional `&bbox=` and `&last=N`
+  frames), `/api/geo`, `/api/aircraft?dist=NM`, `/api/routes?cs=UAL1,DAL2`, `/api/refresh`, `/healthz`.
 - MCP server: `mcp/wxmcp/` (`weather.py` turns collector JSON into summaries, `system.py` reads machine stats,
   `server.py` holds the tools and the auth guard). The display's side is `display/wxterm/remote.py`.
-- Layout: `display/wxterm/app.py`. Panels: `panels.py`. Braille canvas: `canvas.py`. Themes: `themes.py`.
+- Layout: `display/wxterm/app.py`. Panels: `panels.py`, and the map with its radar and air traffic layers in
+  `flights.py` (with the collector side in `collector/wxcollect/flights.py`). Braille canvas: `canvas.py`. Themes: `themes.py`.
 
 ## License
 MIT. See [LICENSE](LICENSE).

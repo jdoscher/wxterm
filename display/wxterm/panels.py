@@ -202,136 +202,9 @@ class NowPanel(Panel):
         return "▲ RISING" if d > 0.7 else "▼ FALLING" if d < -0.7 else "► STEADY"
 
 
-# --- radar --------------------------------------------------------------------
+# --- radar density (the map itself is MapPanel in flights.py) ---------------------
 
-DENS = (0, 2, 3, 5, 7, 8)
-
-
-class RadarPanel(Panel):
-    """The radar loop. Each frame is drawn once and cached, so later passes of the loop cost almost nothing
-    (the map and the rain are redrawn only when the data, size, theme or location changes)."""
-
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        self._frames: dict[tuple, object] = {}
-        self._base: tuple | None = None
-
-    def _key(self) -> tuple | None:
-        app = self.app
-        radar, geo = getattr(app, "radar", None), getattr(app, "geo", None)
-        frames = (radar or {}).get("frames") or []
-        if not frames or not geo:
-            return None
-        idx = min(getattr(app, "radar_idx", 0), len(frames) - 1)
-        base = (self.size.width, self.size.height, radar.get("w"), radar.get("h"), tuple(radar.get("bbox") or ()),
-                id(geo), self.pal.name, getattr(app, "loc", ""), self.label("name"), len(frames))
-        if base != self._base:
-            self._base, self._frames = base, {}
-        return frames[idx]["t"], idx, bool(getattr(app, "radar_paused", False))
-
-    def build_strips(self) -> list:
-        key = self._key()
-        if key is None:
-            return super().build_strips()
-        hit = self._frames.get(key)
-        if hit is None or len(hit) != self.size.height:
-            hit = self._frames[key] = super().build_strips()
-        return hit
-
-    def dot_size(self) -> tuple[int, int]:
-        return max(2, (self.size.width - 2) * 2), max(2, (self.size.height - 2) * 4)
-
-    def on_resize(self, _event):
-        self.app.request_radar()  # type: ignore[attr-defined]
-
-    def draw(self, c, t, w, h):
-        app = self.app
-        radar = getattr(app, "radar", None)
-        geo = getattr(app, "geo", None)
-        W, H = self.dot_size()
-        frames = (radar or {}).get("frames") or []
-        idx = min(getattr(app, "radar_idx", 0), len(frames) - 1) if frames else -1
-        fr = frames[idx] if idx >= 0 else None
-        src = (radar or {}).get("source", "--").upper()
-        ftime = datetime.fromtimestamp(fr["t"], TZ) if fr else None
-        state = "PAUSED" if getattr(app, "radar_paused", False) else "LOOP"
-        c.box(0, 0, w, h, t.dim, f"RADAR · {src} COMPOSITE", t.bright,
-              right=f"{hm(ftime)}  {idx + 1}/{len(frames)} {state}" if fr else "WAITING FOR DATA")
-        if not radar or radar.get("w") != W or radar.get("h") != H or not geo:
-            c.put(3, 2, "LOADING RADAR…", t.dim)
-            return
-        lon0, lon1, lat0, lat1 = radar["bbox"]
-
-        def P(lon, lat):
-            return 2 + (lon - lon0) / (lon1 - lon0) * (W - 1), 4 + (lat1 - lat) / (lat1 - lat0) * (H - 1)
-
-        sub = Canvas(w - 2, h - 2)
-        sub_p = lambda lon, lat: (P(lon, lat)[0] - 2, P(lon, lat)[1] - 4)  # noqa: E731
-        for ln in geo.get("roads", []):
-            sub.polyline([sub_p(*p) for p in ln], t.c("faint"), 1)
-        for ln in geo.get("lakes", []):  # big lakes (Lake Michigan) are shoreline, so draw them like the coast
-            sub.polyline([sub_p(*p) for p in ln], t.c("land"), 3)
-        for key in ("border", "state"):
-            for ln in geo.get(key, []):
-                sub.polyline([sub_p(*p) for p in ln], t.dim, 2, dash=2)
-        for ln in geo.get("coast", []):
-            sub.polyline([sub_p(*p) for p in ln], t.c("land"), 3)
-        hlat, hlon = geo["home"]
-        hx, hy = sub_p(hlon, hlat)
-        for miles in (25, 50):
-            dlat = miles / 69.0
-            ry = dlat / (lat1 - lat0) * (H - 1)
-            rx = dlat / math.cos(math.radians(hlat)) / (lon1 - lon0) * (W - 1)
-            n = int(2 * math.pi * max(rx, ry) / 3)
-            for k in range(n):
-                if k % 2:
-                    continue
-                a = 2 * math.pi * k / n
-                sub.dot(int(hx + rx * math.cos(a)), int(hy + ry * math.sin(a)), t.dim, 1)
-            sub.put(int(hx + rx * 0.71) // 2 + 1, int(hy - ry * 0.71) // 4, f"{miles} MI", t.dim)
-        any_rain = False
-        if fr:
-            levels, snow = t.levels, t.snow
-            for y, row in enumerate(fr["rows"]):
-                if row.count("0") == len(row):
-                    continue
-                for x, ch in enumerate(row):
-                    if ch == "0":
-                        continue
-                    lv = int(ch) if ch.isdigit() else "abcdef".index(ch) + 1
-                    if BAYER[y & 3][x & 1] < DENS[min(lv, 5)]:
-                        sub.dot(x, y, snow if ch.isalpha() else levels[min(lv, 5) - 1], 5 + lv)
-                        any_rain = True
-        for name, lat, lon in geo.get("towns", []):
-            x, y = sub_p(lon, lat)
-            cx, cy = int(x) // 2, int(y) // 4
-            if 0 <= cx < sub.w - 2 and 0 <= cy < sub.h:
-                sub.put(cx, cy, "·" + name if cx < sub.w - len(name) - 2 else name + "·", t.dim)
-        mark = "HOME" if getattr(app, "loc", "") == "home" else self.label("name", "HERE")
-        sub.put(int(hx) // 2, int(hy) // 4, "⌂ " + mark, t.bright)
-        if not any_rain:
-            sub.put(1, sub.h - 1, "NO PRECIPITATION IN RANGE", t.dim)
-        # legend
-        lx = sub.w - 30
-        sub.put(lx - 1, sub.h - 1, " " * 31, t.dim)
-        sub.put(lx, sub.h - 1, "DBZ 10", t.dim)
-        for i, col in enumerate(t.levels):
-            sub.put(lx + 7 + i * 4, sub.h - 1, "██", col)
-        sub.put(lx + 27, sub.h - 1, "50", t.dim)
-        # paste sub into c
-        for y in range(sub.h):
-            for x in range(sub.w):
-                if sub.text[y][x]:
-                    c.put(1 + x, 1 + y, sub.chars[y][x], sub.cstyle[y][x])
-                elif sub.dots[y][x]:
-                    c.dots[1 + y][1 + x] = sub.dots[y][x]
-                    c.dstyle[1 + y][1 + x] = sub.dstyle[y][x]
-                    c.dprio[1 + y][1 + x] = sub.dprio[y][x]
-        # timeline in the bottom border
-        if frames:
-            tl = "".join("█" if i == idx else "▪" for i in range(len(frames)))
-            first, last = (hm(datetime.fromtimestamp(frames[i]["t"], TZ)) for i in (0, -1))
-            c.put(2, h - 1, f" {first} {tl} {last} ", t.fg)
+DENS = (0, 2, 3, 5, 7, 8)   # Bayer threshold per rain level: heavier rain draws more dots
 
 
 # --- 48 hour graph ---------------------------------------------------------------
@@ -728,8 +601,16 @@ class StatusBar(Panel):
                 s = f"{'○' if bad or ent.get('error') else '●'} {label} {ago(ent.get('ok_at'))}"
                 c.put(x, 0, s, t.warn if bad or ent.get("error") else t.dim)
                 x += len(s) + 3
-        right = (f"{app.loc.upper()} [L]  THEME {app.pal.name} [C]  GIF [G]  SHUFFLE [S]  PAUSE [P]  REFRESH [R]"
-                 "  QUIT [Q]")
+        air = getattr(app, "air_on", False)
+        tr = getattr(app, "traffic", None)
+        if air and tr is not None and not err:
+            bad = not tr.ok_at or bool(tr.error) or time.time() - tr.ok_at > 15
+            age = f"{time.time() - tr.ok_at:.0f}S" if tr.ok_at else "--"
+            s = f"{'○' if bad else '●'} {tr.source or 'ADS-B'} {age}"
+            c.put(x, 0, s, t.warn if bad else t.dim)
+        wx = getattr(app, "radar_on", True)
+        right = (f"{app.loc.upper()} [L]  THEME {app.pal.name} [C]  AIR [A]  RADAR [W]  GIF [G]"
+                 f"  SHUFFLE [S]{'  PAUSE [P]' if wx else ''}  REFRESH [R]  QUIT [Q]")
         rx = w - len(right) - 1
         msg = getattr(app, "gif_msg", "")
         if msg:

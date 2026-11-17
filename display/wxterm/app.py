@@ -1,4 +1,7 @@
-"""wxterm: full-screen terminal weather display. Talks to one wxterm collector per location (see api.locations())."""
+"""wxterm: full-screen terminal weather display. Talks to one wxterm collector per location (see api.locations()).
+
+The big map (MapPanel, flights.py) has two layers, each switched on and off on its own: the radar loop (`w`) and
+live air traffic (`a`)."""
 from __future__ import annotations
 
 import json
@@ -8,23 +11,27 @@ import time
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.binding import Binding
+from textual.containers import Container, Horizontal, Vertical
 
 from . import api, gif, glyphs, remote
-from .panels import set_tz, DaysPanel, ExtrasPanel, GraphPanel, NowPanel, RadarPanel, StatusBar, TidePanel
+from .flights import DEFAULT_RANGE, RANGES, TAG_MODES, MapPanel, Traffic
+from .panels import set_tz, DaysPanel, ExtrasPanel, GraphPanel, NowPanel, StatusBar, TidePanel
 from .themes import THEMES, by_name
 
 # Saved theme + location. The kiosk points WXTERM_STATE at /var/lib/wxterm/state.json so scripts/wxctl.sh
 # (run by another user over SSH) can switch the screen; the app watches the file for changes.
 STATE = Path(os.environ.get("WXTERM_STATE") or
              Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "wxterm" / "state.json")
+ON = ("on", "yes", "true", "1")
 
 
 class WxApp(App):
     CSS = """
     Screen { layout: vertical; overflow: hidden; }
     #mid { height: 1fr; }
-    #radar { width: 1fr; }
+    #map { width: 1fr; }
+    #mapview { width: 1fr; height: 1fr; }
     #right { width: 88; }
     #now { height: 12; }
     #graph { height: 15; }
@@ -35,7 +42,15 @@ class WxApp(App):
     """
     BINDINGS = [("c", "cycle_theme", "Theme"), ("l", "cycle_location", "Location"), ("p", "pause", "Pause radar"),
                 ("r", "refresh", "Refresh"), ("q", "quit", "Quit"), ("g", "gif", "Save GIF"),
-                ("f", "cycle_font", "Big font"), ("s", "shuffle", "Shuffle layout")]
+                ("f", "cycle_font", "Big font"), ("s", "shuffle", "Shuffle layout"),
+                # map layers and range
+                ("a", "toggle_air", "Air traffic"), ("w", "toggle_radar", "Radar"),
+                ("plus,equals_sign", "zoom(-1)", "Zoom in"), ("minus,underscore", "zoom(1)", "Zoom out"),
+                # air traffic only; these do nothing while it's off
+                ("t", "air_tags", "Data tags"),
+                Binding("tab", "air_next(1)", show=False, priority=True),
+                Binding("shift+tab", "air_next(-1)", show=False, priority=True),
+                Binding("escape", "air_select_none", show=False, priority=True)]
     # Burn-in guard: every SHUFFLE_MIN minutes swap the map side, reorder the sidebar panels and move the status bar,
     # so no border or label sits on the same pixels for hours. 0 turns it off.
     SHUFFLE_MIN = float(os.environ.get("WXTERM_SHUFFLE_MIN", "15"))
@@ -71,8 +86,17 @@ class WxApp(App):
         self.radar_paused = False
         self.extras_idx = 0
         self.extras_since = time.time()
-        self._radar_want: tuple[int, int] | None = None
+        self._radar_want: tuple | None = None
         self._started = time.time()
+        # map layers: saved choices win; WXTERM_AIR (kiosk.conf AIR) is the first-run default for air traffic,
+        # which is off unless asked for because it polls the ADS-B feeds every few seconds
+        air = st.get("air")
+        self.air_on = air if isinstance(air, bool) else os.environ.get("WXTERM_AIR", "off").lower() in ON
+        self.radar_on = st.get("radar") is not False
+        self.air_range = st.get("air_range") if st.get("air_range") in RANGES else DEFAULT_RANGE
+        self.air_tags = st.get("air_tags") if st.get("air_tags") in TAG_MODES else "AUTO"
+        self.traffic = Traffic()
+        self._air_busy = self._routes_busy = False
 
     @property
     def pal(self):
@@ -89,7 +113,8 @@ class WxApp(App):
     # --- layout ---
     def compose(self) -> ComposeResult:
         with Horizontal(id="mid"):
-            yield RadarPanel(id="radar")
+            with Container(id="map"):
+                yield MapPanel(id="mapview")
             with Vertical(id="right"):
                 yield NowPanel(id="now")
                 yield GraphPanel(id="graph")
@@ -105,12 +130,15 @@ class WxApp(App):
         self.set_interval(30, self._fetch_all_bg)
         self.set_interval(120, self.request_radar)
         # retry fast until frames arrive: right after boot a collector can answer with an empty loop
-        self.set_interval(10, lambda: not (self.radar or {}).get("frames") and self.request_radar())
+        self.set_interval(10, lambda: self.radar_on and not (self.radar or {}).get("frames") and self.request_radar())
         self.set_interval(1, self._tick)
         self.set_interval(self.RADAR_STEP, self._radar_tick)
         self.set_interval(self.TYPE_STEP, self._extras_tick)
         self.set_interval(2, self._watch_state)
         self.set_interval(10, self._write_status)
+        self.set_interval(2.5, self._air_poll)
+        self.set_interval(2, self._air_routes)
+        self.set_interval(0.5, self._air_tick)
         if self.SHUFFLE_MIN > 0:
             self.set_interval(self.SHUFFLE_MIN * 60, self.action_shuffle)
 
@@ -133,7 +161,8 @@ class WxApp(App):
             STATE.parent.mkdir(parents=True, exist_ok=True)
             tmp = STATE.with_suffix(".tmp")
             tmp.write_text(json.dumps({"theme": self.pal.name, "location": self.loc, "bigfont": self.bigfont,
-                                       "gif": self._gif_token}))
+                                       "gif": self._gif_token, "air": self.air_on, "radar": self.radar_on,
+                                       "air_range": self.air_range, "air_tags": self.air_tags}))
             tmp.replace(STATE)
             self._state_mtime = self._mtime()
         except OSError:
@@ -143,12 +172,19 @@ class WxApp(App):
         """Publish what the screen is doing for remote readers (the MCP server's get_status)."""
         mid, right = self.query_one("#mid"), self.query_one("#right")
         frames = (self.radar or {}).get("frames") or []
+        tr = self.traffic
         remote.write_status(STATE, {
             "time": time.time(), "started": self._started, "pid": os.getpid(),
             "cells": [self.size.width, self.size.height],
             "location": self.loc, "theme": self.pal.name, "bigfont": self.bigfont,
             "radar_paused": self.radar_paused, "radar_frames": len(frames), "recording_gif": self._recording,
-            "layout": {"map": "left" if mid.children[0].id == "radar" else "right",
+            "layers": {"radar": self.radar_on, "air": self.air_on}, "range_nm": self.air_range,
+            "air": {"tags": self.air_tags, "aircraft": len(tr.planes), "feed": tr.source or None,
+                    "feed_error": tr.error or None,
+                    "feed_age_s": round(time.time() - tr.ok_at) if tr.ok_at else None,
+                    "selected": tr.planes[tr.selected].callsign if tr.selected in tr.planes else None}
+            if self.air_on else None,
+            "layout": {"map": "left" if mid.children[0].id == "map" else "right",
                        "sidebar": [w.id for w in right.children],
                        "status_bar": "top" if self.screen.children[0].id == "status" else "bottom"},
             "data_error": self.api_error, "shuffle_min": self.SHUFFLE_MIN,
@@ -172,18 +208,27 @@ class WxApp(App):
         if st.get("bigfont") in glyphs.STYLES and st["bigfont"] != self.bigfont:
             self.bigfont = st["bigfont"]
             self.query_one("#now").refresh()
+        if isinstance(st.get("air"), bool) and st["air"] != self.air_on:
+            self._set_air_layer(st["air"], save=False)
+        if isinstance(st.get("radar"), bool) and st["radar"] != self.radar_on:
+            self._set_radar_layer(st["radar"], save=False)
+        if st.get("air_range") in RANGES and st["air_range"] != self.air_range:
+            self._set_range(st["air_range"], save=False)   # saving here would write back the other old values
+        if st.get("air_tags") in TAG_MODES and st["air_tags"] != self.air_tags:
+            self.air_tags = st["air_tags"]
+            self._refresh_map()
         if st.get("gif") and st.get("gif") != self._gif_token:
             self._gif_token = st["gif"]
             self.action_gif()
 
     def _apply_theme(self):
         self.screen.styles.background = self.pal.bg
-        for w in self.query("#mid, #right, #now, #radar, #graph, #tide, #days, #extras, #status"):
+        for w in self.query("#mid, #map, #right, #now, #mapview, #graph, #tide, #days, #extras, #status"):
             w.styles.background = self.pal.bg
         self.refresh_all()
 
     def refresh_all(self):
-        for w in self.query("#now, #radar, #graph, #tide, #days, #extras, #status"):
+        for w in self.query("#now, #mapview, #graph, #tide, #days, #extras, #status"):
             w.refresh()
 
     # --- actions ---
@@ -207,18 +252,18 @@ class WxApp(App):
             order = list(self.SIDEBAR)
             random.shuffle(order)
             map_left, status_top = random.random() < 0.5, random.random() < 0.5
-            sig = ("radar" if map_left else "right", tuple(o[1:] for o in order), "status" if status_top else "mid")
+            sig = ("map" if map_left else "right", tuple(o[1:] for o in order), "status" if status_top else "mid")
             if sig != before:
                 break
         widgets = [self.query_one(sel) for sel in order]
         for i, w in enumerate(widgets):
             if right.children[i] is not w:
                 right.move_child(w, before=i)
-        radar = self.query_one("#radar")
-        if map_left and mid.children[0] is not radar:
-            mid.move_child(radar, before=0)
-        elif not map_left and mid.children[0] is radar:
-            mid.move_child(radar, after=right)
+        mp = self.query_one("#map")
+        if map_left and mid.children[0] is not mp:
+            mid.move_child(mp, before=0)
+        elif not map_left and mid.children[0] is mp:
+            mid.move_child(mp, after=right)
         status = self.query_one("#status")
         if status_top and self.screen.children[0] is not status:
             self.screen.move_child(status, before=0)
@@ -236,7 +281,7 @@ class WxApp(App):
         self.query_one("#status").refresh()
 
     def action_gif(self):
-        """Record one full radar loop of the screen to a GIF in WXTERM_GIF_DIR (~/gifs)."""
+        """Record one full radar loop of the screen to a GIF in WXTERM_GIF_DIR (~/gifs); 10 s with radar off."""
         if self._recording:
             return
         why = gif.available()
@@ -245,11 +290,13 @@ class WxApp(App):
             return
         frames = len((self.radar or {}).get("frames") or []) or 13
         seconds = (frames + 8) * self.RADAR_STEP + 0.4   # every frame plus the hold on the latest = one clean loop
+        if not self.radar_on:
+            seconds = 10.0                    # no loop to follow: ten seconds of traffic
         self.radar_idx, self.radar_hold, self.radar_paused = 0, 0, False
         self._recording = True
         self.gif_msg = ""  # keep the status bar clean while recording
         self.query_one("#status").refresh()
-        name = self.loc
+        name = self.loc + ("-air" if self.air_on else "")
 
         def work():
             try:
@@ -273,6 +320,7 @@ class WxApp(App):
         self.data = self.radar = self.geo = None
         self.api_error = None
         self.radar_idx = 0
+        self.traffic.reset()
         if save:
             self._save_state()
         self.refresh_all()
@@ -280,11 +328,170 @@ class WxApp(App):
 
     def action_pause(self):
         self.radar_paused = not self.radar_paused
-        self.query_one("#radar").refresh()
+        self._refresh_map()
 
     def action_refresh(self):
         self._fetch_all_bg()
         self.request_radar()
+        self._air_poll()
+
+    def _refresh_map(self):
+        """Redraw the map, if it's mounted (timers can fire while the app is shutting down)."""
+        for w in self.query("#mapview"):
+            w.refresh()
+
+    # --- map layers and range ---
+    def action_toggle_air(self):
+        self._set_air_layer(not self.air_on)
+
+    def _set_air_layer(self, on: bool, save: bool = True):
+        self.air_on = on
+        if not on:
+            self.traffic.selected = None
+        if save:
+            self._save_state()
+        # the traffic list beside the map comes and goes, so the map's size changes: ask for data after layout
+        self.call_after_refresh(self._air_poll)
+        self.call_after_refresh(self.request_radar)
+        self.refresh_all()
+
+    def action_toggle_radar(self):
+        self._set_radar_layer(not self.radar_on)
+
+    def _set_radar_layer(self, on: bool, save: bool = True):
+        self.radar_on = on
+        self.radar = None   # fetched fresh when it comes back on, so it's never an old loop
+        self.radar_idx = self.radar_hold = 0
+        if save:
+            self._save_state()
+        self.request_radar()
+        self.refresh_all()
+
+    def action_zoom(self, step: int):
+        i = RANGES.index(self.air_range) if self.air_range in RANGES else RANGES.index(DEFAULT_RANGE)
+        rng = RANGES[max(0, min(len(RANGES) - 1, i + step))]
+        if rng != self.air_range:
+            self._set_range(rng)
+
+    def _set_range(self, rng: int, save: bool = True):
+        self.air_range = rng
+        self.traffic.placed.clear()
+        self.radar = None   # sampled for the old range; the new loop arrives in a second or two
+        if save:
+            self._save_state()
+        self._air_poll()
+        self.request_radar()
+        self._refresh_map()
+
+    def action_air_tags(self):
+        if not self.air_on:
+            return
+        self.air_tags = TAG_MODES[(TAG_MODES.index(self.air_tags) + 1) % len(TAG_MODES)]
+        self._save_state()
+        self._refresh_map()
+
+    def action_air_next(self, step: int):
+        """Tab / shift+Tab: select the next aircraft in the traffic list (nearest first)."""
+        if not self.air_on:
+            return
+        order = self.query_one(MapPanel).order
+        if not order:
+            return
+        sel = self.traffic.selected
+        i = (order.index(sel) + step) % len(order) if sel in order else (0 if step > 0 else -1)
+        self.traffic.selected = order[i]
+        self._refresh_map()
+
+    def check_action(self, action: str, parameters) -> bool | None:
+        """Map keys stay out of dialogs, and air traffic keys only act while it's on; otherwise Tab and Escape keep
+        their usual jobs."""
+        if action.startswith("air_") or action in ("toggle_air", "toggle_radar", "zoom"):
+            if len(self.screen_stack) > 1:
+                return False
+            if action.startswith("air_") and not self.air_on:
+                return False
+            if action == "air_select_none" and not self.traffic.selected:
+                return False
+        return True
+
+    def action_air_select_none(self):
+        self.air_select(None)
+
+    def air_select(self, hex_: str | None):
+        """Select an aircraft (a click on it); clicking the selected one again clears it."""
+        self.traffic.selected = hex_ if hex_ != self.traffic.selected else None
+        self._refresh_map()
+
+    def _air_tick(self):
+        if self.air_on and not self._radar_running():   # while the loop runs, _radar_tick moves the aircraft too
+            self._refresh_map()
+
+    def _air_poll(self):
+        if not self.air_on or self._air_busy:
+            return
+        panel = self.query(MapPanel).first(MapPanel) if self.query(MapPanel) else None
+        if panel is None or panel.size.width < 10:
+            return
+        base, dist = self.base, panel.fetch_dist()
+        self._air_busy = True
+        self.run_worker(lambda: self._fetch_air(base, dist), thread=True, group="air")
+
+    def _fetch_air(self, base, dist):
+        try:
+            j = api.get(base, f"/api/aircraft?dist={dist}", timeout=12)
+            self.call_from_thread(self._set_air, base, j, None)
+        except Exception as e:  # noqa: BLE001
+            msg = f"{type(e).__name__}: {e}"
+            try:
+                msg = json.loads(e.read()).get("error") or msg  # type: ignore[attr-defined]  # the collector's reason
+            except Exception:  # noqa: BLE001
+                pass
+            self.call_from_thread(self._set_air, base, None, msg.upper()[:70])
+        finally:
+            self._air_busy = False
+
+    def _set_air(self, base, j, err):
+        if base != self.base:
+            return
+        if j is not None:
+            self.traffic.ingest(j, time.time())
+        else:
+            self.traffic.error = err
+        self._refresh_map()
+
+    def _air_routes(self):
+        """Look up routes for the selected aircraft and the 30 nearest airborne ones, a few at a time."""
+        if not self.air_on or self._routes_busy:
+            return
+        tr = self.traffic
+        near = sorted((p for p in tr.planes.values() if not p.ground and hasattr(p, "d_home")),
+                      key=lambda p: p.d_home)[:30]
+        want = tr.wanted_routes(([tr.planes[tr.selected]] if tr.selected in tr.planes else []) + near)
+        if not want:
+            return
+        for cs in want:
+            tr.routes[cs] = "pending"
+        base = self.base
+        self._routes_busy = True
+        self.run_worker(lambda: self._fetch_routes(base, want), thread=True, group="routes")
+
+    def _fetch_routes(self, base, want):
+        try:
+            res = api.get(base, "/api/routes?cs=" + ",".join(want), timeout=60)
+        except Exception:  # noqa: BLE001 - asked again on the next round
+            res = None
+        finally:
+            self._routes_busy = False
+        self.call_from_thread(self._set_routes, base, want, res)
+
+    def _set_routes(self, base, want, res):
+        if base != self.base:
+            return
+        for cs in want:
+            if res is None:
+                self.traffic.routes.pop(cs, None)
+            else:
+                self.traffic.routes[cs] = res.get(cs)
 
     # --- network (threads) ---
     def _fetch_all_bg(self):
@@ -313,64 +520,79 @@ class WxApp(App):
         base = self.base
         try:
             g = api.get(base, "/api/geo")
-            self.call_from_thread(lambda: setattr(self, "geo", g) if base == self.base else None)
+            self.call_from_thread(self._set_geo, base, g)
         except Exception:  # noqa: BLE001 - retried on next refresh
             pass
 
-    def request_radar(self):
-        try:
-            w, h = self.query_one(RadarPanel).dot_size()
-        except Exception:  # noqa: BLE001 - not mounted yet
-            return
-        self._radar_want = (w, h)
-        base = self.base
-        self.run_worker(lambda: self._fetch_radar(base, w, h), thread=True, group="radar", exclusive=True)
+    def _set_geo(self, base, g):
+        if base == self.base:
+            self.geo = g
+            self.request_radar()   # the radar box is centred on home, which comes with the map
 
-    def _fetch_radar(self, base, w, h):
+    def request_radar(self):
+        """The radar loop, sampled by the collector to the map's box at the current range."""
+        if not self.radar_on or not self.geo:
+            return
+        panel = self.query(MapPanel).first(MapPanel) if self.query(MapPanel) else None
+        if panel is None or panel.size.width < 10:
+            return   # not laid out yet; on_resize asks again
+        w, h, _ = panel.view()
+        bbox = panel.bbox(self.geo["home"])
+        want = (w, h, self.air_range, self.base)
+        self._radar_want = want
+        q = f"/api/radar?w={w}&h={h}&bbox=" + ",".join(f"{v:.5f}" for v in bbox)
+        self.run_worker(lambda: self._fetch_radar(want, q), thread=True, group="radar", exclusive=True)
+
+    def _fetch_radar(self, want, q):
         try:
-            r = api.get(base, f"/api/radar?w={w}&h={h}", timeout=60)
-            self.call_from_thread(self._set_radar, base, r)
-        except Exception:  # noqa: BLE001
+            r = api.get(want[3], q, timeout=60)
+            self.call_from_thread(self._set_radar, want, r)
+        except Exception:  # noqa: BLE001 - asked again in 2 minutes, on zoom, or every 10 s while there's no loop
             pass
 
-    def _set_radar(self, base, r):
-        if base != self.base:
-            return
-        if self._radar_want and (r.get("w"), r.get("h")) != self._radar_want:
-            return  # stale size
+    def _set_radar(self, want, r):
+        if want != self._radar_want or not self.radar_on:
+            return  # made for another size, range or place
         new_latest = (r.get("frames") or [{}])[-1].get("t")
         old_latest = ((self.radar or {}).get("frames") or [{}])[-1].get("t")
         self.radar = r
         if new_latest != old_latest:
             self.radar_idx = 0
-        self.query_one("#radar").refresh()
+        self._refresh_map()
 
     # --- timers ---
     def _tick(self):
         if self.gif_msg and time.time() > self._gif_msg_until:
             self.gif_msg = ""
-        self.query_one("#now").refresh()
-        self.query_one("#status").refresh()
-        if int(time.time()) % 60 == 0:
-            for sel in ("#graph", "#tide"):
-                self.query_one(sel).refresh()
+        sel = "#now, #status" + (", #graph, #tide" if int(time.time()) % 60 == 0 else "")
+        for w in self.query(sel):
+            w.refresh()
+
+    def _radar_running(self) -> bool:
+        return self.radar_on and not self.radar_paused and bool((self.radar or {}).get("frames"))
 
     def _radar_tick(self):
-        frames = (self.radar or {}).get("frames") or []
-        if not frames or self.radar_paused:
+        """Step the radar loop. With air traffic on too, this tick also moves the aircraft, so the map is drawn once
+        per step instead of on two timers."""
+        if not self._radar_running():
             return
+        frames = self.radar["frames"]
         if self.radar_idx >= len(frames) - 1:
             self.radar_hold += 1
-            if self.radar_hold < 8:  # linger on the latest frame
+            if self.radar_hold < 8 and not self.air_on:  # linger on the latest frame
                 return
-            self.radar_hold, self.radar_idx = 0, 0
+            if self.radar_hold >= 8:
+                self.radar_hold, self.radar_idx = 0, 0
         else:
             self.radar_idx += 1
-        self.query_one("#radar").refresh()
+        self._refresh_map()
 
     def _extras_tick(self):
+        panels = self.query(ExtrasPanel)
+        if not panels:  # timers can fire while the app is shutting down and the panel is already gone
+            return
+        panel = panels.first(ExtrasPanel)
         slots = ExtrasPanel.available(self)
-        panel = self.query_one(ExtrasPanel)
         if time.time() - self.extras_since > slots[self.extras_idx % len(slots)][1]:
             self.extras_idx = (self.extras_idx + 1) % len(slots)
             self.extras_since = time.time()

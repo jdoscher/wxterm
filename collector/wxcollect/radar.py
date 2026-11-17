@@ -195,12 +195,15 @@ class Radar:
         return {"source": "iem", "frames": 1}
 
     # -- sampling --
-    def grid(self, w: int, h: int, bbox=None) -> dict:
+    def grid(self, w: int, h: int, bbox=None, last: int = 0) -> dict:
+        """Level rows for every frame (oldest first), or only the newest `last` frames."""
         w, h = max(2, min(w, 800)), max(2, min(h, 600))
         bbox = tuple(bbox) if bbox else bbox_for(w, h)
         with self.lock:
             frames = sorted(self.frames.items(), key=lambda kv: kv[1].t)
             source = self.source
+        if last > 0:
+            frames = frames[-last:]
         out = []
         for key, fr in frames:
             ck = (key, w, h, bbox)

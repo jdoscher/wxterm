@@ -27,13 +27,15 @@ collectors (Docker, one per location, localhost:8091+)  ── JSON ──>  dis
 ```
 
 ## Features
-- **One map, three layers.** The map (coast, borders, highways, towns, runways and airport codes) is centred on home
-  with range rings, from 5 to 100 NM. The **radar loop** (`w`), live **air traffic** (`a`) and **spacecraft** (`o`)
-  each switch on and off on their own.
+- **One map, four layers.** The map (coast, borders, highways, towns, runways and airport codes) is centred on home
+  with range rings, from 5 to 100 NM. The **radar loop** (`w`), live **air traffic** (`a`), **spacecraft** (`o`)
+  and **APRS** stations (`x`) each switch on and off on their own.
 - **Air traffic** (contributed by [Justin Van Bibber](https://github.com/notjvb)): live ADS-B aircraft as arrows with
   trails and data tags, a traffic list and the selected flight's details
 - **Spacecraft:** the space stations, the brightest satellites and Starlink as they cross the map, with ground
   tracks, a countdown to the next station overhead, and the stations' visible passes
+- **APRS** (contributed by [Steve Miller, KC1AWV](https://github.com/kc1awv)): stations heard on APRS-IS around home,
+  receive-only, with weather stations' temperatures, tracks and a heard list (needs a callsign)
 - **Now:** temperature in seven-segment digits, conditions, wind, pressure trend, alerts (US)
 - **48 hours:** temperature and dew point lines with rain-chance bars
 - **Tides and moon:** tide curve with highs and lows, plus moon phase, rise and set, and the next full and new moon
@@ -66,6 +68,7 @@ Use a terminal of at least 160x45. It's designed for 240x62, which is 1920x1080 
 | `w` | radar loop on/off |
 | `a` | air traffic on/off |
 | `o` | spacecraft on/off |
+| `x` | APRS: all stations, weather stations only, off (when APRS is set up) |
 | `+` `-` | range: 5, 10, 15, 25, 40, 60 or 100 NM from home to the nearest edge (40 to start) |
 | `g` | save a GIF of one radar loop (10 s with the radar off) to `~/gifs` |
 | `s` | shuffle the layout now |
@@ -105,6 +108,9 @@ change `kiosk.conf`. Every setting:
 | `THEME` | `amber` | first-run theme; `c` changes it and the choice is saved |
 | `BIGFONT` | `segment` | first-run digit style; `f` changes it |
 | `AIR` | `off` | first-run air traffic: `on` or `off` (it polls the ADS-B feeds every 2.5 s while on); `a` changes it |
+| `APRS_CALL` | none | your callsign turns on APRS (receive-only); blank = off |
+| `APRS_LOCATIONS`, `APRS_RANGE_KM` | first location, `150` | which collectors connect to APRS-IS, and the filter radius |
+| `APRS_VIEW` | `all` | first-run APRS layer: `all`, `wx` or `off`; `x` changes it |
 | `LID` | `ignore` | laptop lid in kiosk mode: `ignore`, or `suspend` to sleep when it closes and wake when it opens (on battery or power; a dock keeps it awake). The display refreshes everything on waking |
 | `SHUFFLE_MIN` | `15` | burn-in shuffle interval in minutes, `0` = off |
 | `GIF_FPS` | `10` | GIF frame rate |
@@ -216,6 +222,22 @@ updates each group every couple of hours and refuses repeat downloads before the
 fetches each group at most every 6 hours and keeps it on disk, and the display asks only that collector. The layer
 makes no other network requests.
 
+## APRS
+With a callsign in `APRS_CALL`, the home collector listens to APRS-IS around home and the map shows what it hears.
+`x` cycles the layer: ALL (every station as a symbol with its callsign where it fits, 30-minute tracks behind moving
+stations, stations not heard for 30 minutes dimmed), WX (APRS and CWOP weather stations' temperatures, like a surface
+map) and OFF. Two rotating panels list the stations heard most recently and the nearby weather stations under the
+official observation.
+
+> **Hat tip:** APRS is the work of [Steve Miller, KC1AWV](https://github.com/kc1awv). Thanks, Steve.
+
+- **Receive-only.** The login uses passcode -1, so APRS-IS never accepts anything from wxterm: nothing is transmitted
+  or gated. APRS-IS still asks for a callsign as the login name, so APRS stays off without one.
+- **One connection**, from the locations in `APRS_LOCATIONS` (default: the first one, home), with a range filter
+  (`APRS_RANGE_KM`, 150 km) around home rounded to 0.1°, so your exact location stays on the machine.
+- Packets are read by wxterm's own small parser (`collector/wxcollect/aprsparse.py`: positions, compressed positions,
+  Mic-E, objects, items, weather, status), so the project stays MIT throughout.
+
 ## MCP server (let an LLM read it)
 With `MCP=yes` in `kiosk.conf`, setup runs a small read-only [MCP](https://modelcontextprotocol.io) server in Docker
 at `http://KIOSK:8090/mcp`. Ask your assistant "is rain heading my way?", "when's the next high tide?" or "is the
@@ -290,6 +312,7 @@ skipped. Every `.env` key is documented in `collector/wxcollect/config.py`.
 | Airports and runways | [OurAirports](https://ourairports.com/data/) (public domain) | static |
 | Aircraft (air traffic) | [adsb.fi open data](https://github.com/adsbfi/opendata), [adsb.lol](https://api.adsb.lol) as a fallback | 2.5 s, only while air traffic is on |
 | Flight routes | [adsbdb](https://www.adsbdb.com) | on demand, cached 6 h |
+| APRS stations | [APRS-IS](https://www.aprs-is.net) (receive-only, needs a callsign) | live |
 | Spacecraft orbits | [CelesTrak](https://celestrak.org/NORAD/elements/) (stations, visual, Starlink), propagated locally with [sgp4](https://pypi.org/project/sgp4/) | 6 h, one collector |
 | Town names (`new-location.py`) | [GeoNames](https://www.geonames.org) cities over 5,000 people (CC BY 4.0) | static |
 
@@ -305,7 +328,7 @@ data is CC BY 4.0.
 - `python -m wxterm.snap OUTDIR 240 67 [themes...]` (with `WXTERM_LOCATION=sf`) renders the screen headless to SVG
   and fails if any panel shows an error. `WXTERM_AIR=on` adds air traffic to the map.
 - Collector API, per location (localhost only): `GET /api/all`, `/api/radar?w=&h=` (optional `&bbox=` and `&last=N`
-  frames), `/api/geo`, `/api/aircraft?dist=NM`, `/api/routes?cs=UAL1,DAL2`, `/api/tle?group=stations`, `/api/refresh`, `/healthz`.
+  frames), `/api/geo`, `/api/aircraft?dist=NM`, `/api/routes?cs=UAL1,DAL2`, `/api/tle?group=stations`, `/api/aprs`, `/api/refresh`, `/healthz`.
 - MCP server: `mcp/wxmcp/` (`weather.py` turns collector JSON into summaries, `system.py` reads machine stats,
   `server.py` holds the tools and the auth guard). The display's side is `display/wxterm/remote.py`.
 - Layout: `display/wxterm/app.py`. Panels: `panels.py`, and the map with its radar and air traffic layers in

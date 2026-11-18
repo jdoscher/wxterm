@@ -3,6 +3,9 @@
 
 The first location (home) polls at full rate; the rest are demo cities that poll WX_POLL_SCALE (4x) slower and catch up
 when the display switches to them. Run after adding or removing a location.
+
+With APRS_CALL set (in the environment or .env, from kiosk.conf), the locations in APRS_LOCATIONS (default: the first
+one) also connect to APRS-IS. Each one is its own receive-only connection, so keep the list short.
 """
 from __future__ import annotations
 
@@ -49,17 +52,26 @@ def read_order() -> list[tuple[str, int]]:
     return out
 
 
-def only() -> set[str]:
-    """WXTERM_ONLY from the environment, else from .env (kiosk.conf LOCATIONS, written by setup.sh). Empty = all."""
-    val = os.environ.get("WXTERM_ONLY")
+def setting(name: str) -> str:
+    """A setting from the environment, else from .env (written by kiosk/setup.sh from kiosk.conf)."""
+    val = os.environ.get(name)
     if val is None:
         try:
             for line in (ROOT / ".env").read_text().splitlines():
-                if line.startswith("WXTERM_ONLY="):
+                if line.startswith(f"{name}="):
                     val = line.split("=", 1)[1].strip().strip('"')
         except OSError:
             pass
-    return {n for n in re.split(r"[\s,]+", val or "") if n}
+    return val or ""
+
+
+def names(val: str) -> set[str]:
+    return {n for n in re.split(r"[\s,]+", val) if n}
+
+
+def only() -> set[str]:
+    """WXTERM_ONLY (kiosk.conf LOCATIONS). Empty = all."""
+    return names(setting("WXTERM_ONLY"))
 
 
 def main():
@@ -78,6 +90,7 @@ def main():
         "",
         "services:",
     ]
+    aprs = (names(setting("APRS_LOCATIONS")) or {locs[0][0]}) if setting("APRS_CALL") else set()
     for i, (n, port) in enumerate(locs):
         scale = "1" if i == 0 else "4"
         out += [
@@ -87,6 +100,14 @@ def main():
             "    environment:",
             '      WX_UA: "${WX_UA:-}"',
             f'      WX_POLL_SCALE: "{scale}"',
+        ]
+        if n in aprs:  # receive-only APRS-IS for this location (collector/wxcollect/aprs.py)
+            out += [
+                '      WX_APRS: "1"',
+                '      WX_APRS_CALL: "${APRS_CALL:-}"',
+                '      WX_APRS_RANGE_KM: "${APRS_RANGE_KM:-}"',
+            ]
+        out += [
             f'    ports: ["127.0.0.1:{port}:8091"]  # localhost only: the display runs on this machine',
             f'    volumes: ["./locations:/locations:ro", "wx-{n}:/data"]',
         ]
@@ -94,7 +115,8 @@ def main():
     out += ["", "volumes:"] + [f"  wx-{n}:" for n, _ in locs]
     (ROOT / "docker-compose.yml").write_text("\n".join(out) + "\n")
     print(f"docker-compose.yml: {', '.join(n for n, _ in locs)}" + (f" (LOCATIONS: {' '.join(sorted(keep))})"
-                                                                    if keep else ""))
+                                                                    if keep else "")
+          + (f"; APRS: {' '.join(n for n, _ in locs if n in aprs)}" if aprs else ""))
 
 
 if __name__ == "__main__":

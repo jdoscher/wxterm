@@ -34,6 +34,17 @@ START_LOCATION=home
 # change them later and the choice is saved
 THEME=amber
 BIGFONT=segment
+# --- APRS (optional) -----------------------------------------------------------------------------------------
+# Your callsign turns on APRS: stations heard on APRS-IS around home, drawn on the map (key x). Receive-only: the
+# login uses passcode -1, so nothing is ever transmitted or gated. Blank = APRS off.
+APRS_CALL=
+# Locations that connect to APRS-IS (space-separated). Blank = the first one in locations/order (home)
+APRS_LOCATIONS=
+# Filter radius around each location in km (150 covers the map at 60 NM)
+APRS_RANGE_KM=150
+# First-run APRS layer (key x cycles it and the choice is saved): off, wx (weather stations' temperatures) or all
+APRS_VIEW=all
+
 # First-run air traffic on the map: off or on (polls the free ADS-B feeds every 2.5 s while on); key a switches it
 # and the choice is saved. The radar loop is on by default; key w switches it.
 AIR=off

@@ -52,3 +52,10 @@ def test_range_and_tags_commands(tmp_path):
     assert json.loads((tmp_path / "state.json").read_text()) == {"air_range": 25, "air_tags": "ALL"}
     assert wxctl(tmp_path, "range", "30").returncode != 0
     assert wxctl(tmp_path, "tags", "some").returncode != 0
+
+
+def test_aprs_command(tmp_path):
+    assert wxctl(tmp_path, "aprs", "wx").returncode == 0
+    assert json.loads((tmp_path / "state.json").read_text()) == {"aprs_view": "WX"}
+    r = wxctl(tmp_path, "aprs", "map")       # 1.4 has no separate APRS map: it's a layer on the one map
+    assert r.returncode != 0 and "off, wx or all" in r.stderr

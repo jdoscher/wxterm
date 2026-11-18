@@ -1,7 +1,7 @@
 """wxterm: full-screen terminal weather display. Talks to one wxterm collector per location (see api.locations()).
 
 The big map (MapPanel, flights.py) has three layers, each switched on and off on its own: the radar loop (`w`), live
-air traffic (`a`) and spacecraft overhead (`o`, space.py)."""
+air traffic (`a`), spacecraft overhead (`o`, space.py) and APRS stations (`x`, aprs.py, by Steve Miller)."""
 from __future__ import annotations
 
 import json
@@ -14,7 +14,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 
-from . import api, gif, glyphs, remote, space
+from . import api, aprs, gif, glyphs, remote, space
 from .flights import DEFAULT_RANGE, RANGES, TAG_MODES, MapPanel, Traffic
 from .panels import set_tz, DaysPanel, ExtrasPanel, GraphPanel, NowPanel, StatusBar, TidePanel
 from .themes import THEMES, by_name
@@ -45,6 +45,7 @@ class WxApp(App):
                 ("f", "cycle_font", "Big font"), ("s", "shuffle", "Shuffle layout"),
                 # map layers and range
                 ("a", "toggle_air", "Air traffic"), ("w", "toggle_radar", "Radar"), ("o", "toggle_space", "Spacecraft"),
+                ("x", "cycle_aprs", "APRS"),
                 ("plus,equals_sign", "zoom(-1)", "Zoom in"), ("minus,underscore", "zoom(1)", "Zoom out"),
                 # air traffic only; these do nothing while it's off
                 ("t", "air_tags", "Data tags"),
@@ -107,6 +108,10 @@ class WxApp(App):
         self.space_passes: list[space.Pass] | None = None  # passes over the location (None = not worked out yet)
         self._space_for: tuple | None = None               # (location, bbox) the two above were worked out for
         self._space_busy = False
+        # APRS (only where the collector runs it): saved choice wins, WXTERM_APRS_VIEW (kiosk.conf) is the default
+        view = (st.get("aprs_view") or os.environ.get("WXTERM_APRS_VIEW") or "ALL").upper()
+        self.aprs_view = view if view in aprs.VIEWS else "ALL"
+        self.aprs: dict | None = None
 
     @property
     def pal(self):
@@ -152,6 +157,7 @@ class WxApp(App):
         self.set_interval(30, self._space_scan)
         self.set_interval(600, self._space_slow)
         self.set_interval(3 * 3600, self._space_fetch)
+        self.set_interval(20, self._fetch_aprs_bg)
         self.call_after_refresh(self._space_fetch)
         if self.SHUFFLE_MIN > 0:
             self.set_interval(self.SHUFFLE_MIN * 60, self.action_shuffle)
@@ -176,7 +182,7 @@ class WxApp(App):
             tmp = STATE.with_suffix(".tmp")
             tmp.write_text(json.dumps({"theme": self.pal.name, "location": self.loc, "bigfont": self.bigfont,
                                        "gif": self._gif_token, "air": self.air_on, "radar": self.radar_on,
-                                       "space": self.space_on,
+                                       "space": self.space_on, "aprs_view": self.aprs_view,
                                        "air_range": self.air_range, "air_tags": self.air_tags}))
             tmp.replace(STATE)
             self._state_mtime = self._mtime()
@@ -195,6 +201,9 @@ class WxApp(App):
             "radar_paused": self.radar_paused, "radar_frames": len(frames), "recording_gif": self._recording,
             "layers": {"radar": self.radar_on, "air": self.air_on, "space": self.space_on},
             "range_nm": self.air_range,
+            "aprs": {"view": self.aprs_view, "stations": len(aprs.stations(self)),
+                     "error": ((self.data or {}).get("sources", {}).get("aprs") or {}).get("error")}
+            if aprs.enabled(self) else None,
             "space": {"objects": len(self.sky), "near_map": len(self.sky.cand),
                       "next_station_over_map": ({"name": self.space_next[0], "at": round(self.space_next[1])}
                                                 if self.space_next else None)} if self.space_on else None,
@@ -231,6 +240,8 @@ class WxApp(App):
             self._set_air_layer(st["air"], save=False)
         if isinstance(st.get("radar"), bool) and st["radar"] != self.radar_on:
             self._set_radar_layer(st["radar"], save=False)
+        if st.get("aprs_view") in aprs.VIEWS and st["aprs_view"] != self.aprs_view:
+            self._set_aprs_view(st["aprs_view"], save=False)
         if isinstance(st.get("space"), bool) and st["space"] != self.space_on:
             self._set_space_layer(st["space"], save=False)
         if st.get("air_range") in RANGES and st["air_range"] != self.air_range:
@@ -343,6 +354,7 @@ class WxApp(App):
         self.radar_idx = 0
         self.traffic.reset()
         self.sky.cand, self.space_next, self.space_passes, self._space_for = [], None, None, None
+        self.aprs = None
         if save:
             self._save_state()
         self.refresh_all()
@@ -388,6 +400,36 @@ class WxApp(App):
             self._space_scan()
             self._space_slow()
         self.refresh_all()
+
+    def action_cycle_aprs(self):
+        self._set_aprs_view(aprs.VIEWS[(aprs.VIEWS.index(self.aprs_view) + 1) % len(aprs.VIEWS)])
+
+    def _set_aprs_view(self, view: str, save: bool = True):
+        self.aprs_view = view
+        if save:
+            self._save_state()
+        self._fetch_aprs_bg()
+        self.refresh_all()
+
+    def _fetch_aprs_bg(self):
+        """Every 20 s while this location's collector runs APRS (even with the layer off: its panels read it)."""
+        if not aprs.enabled(self):
+            return
+        base = self.base
+
+        def work():
+            try:
+                j = api.get(base, "/api/aprs")
+            except Exception:  # noqa: BLE001 - shown as stale in the status bar; asked again in 20 s
+                return
+            self.call_from_thread(self._set_aprs, base, j)
+
+        self.run_worker(work, thread=True, group="aprs", exclusive=True)
+
+    def _set_aprs(self, base, j):
+        if base == self.base:
+            self.aprs = j
+            self._refresh_map()
 
     def action_toggle_radar(self):
         self._set_radar_layer(not self.radar_on)
@@ -442,7 +484,7 @@ class WxApp(App):
     def check_action(self, action: str, parameters) -> bool | None:
         """Map keys stay out of dialogs, and air traffic keys only act while it's on; otherwise Tab and Escape keep
         their usual jobs."""
-        if action.startswith("air_") or action in ("toggle_air", "toggle_radar", "toggle_space", "zoom"):
+        if action.startswith("air_") or action in ("toggle_air", "toggle_radar", "toggle_space", "cycle_aprs", "zoom"):
             if len(self.screen_stack) > 1:
                 return False
             if action.startswith("air_") and not self.air_on:
@@ -553,7 +595,10 @@ class WxApp(App):
             return
         if d is not None:
             set_tz((d.get("home") or {}).get("tz"))
+            first = self.data is None
             self.data = d
+            if first:
+                self._fetch_aprs_bg()
         if err and self.waking():
             return   # Wi-Fi is still reconnecting after a suspend; the retries above will get through
         self.api_error = err

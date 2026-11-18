@@ -26,7 +26,7 @@ cd "$WXTERM_DIR"
 echo "== locations + collectors"
 ls locations/*.env >/dev/null 2>&1 || { echo "no locations; add one with scripts/new-location.py"; exit 1; }
 [[ -f locations/home.env ]] || echo "   note: no locations/home.env yet. Make yours with: scripts/new-location.py home LAT LON"
-ua="wxterm/1.3 (+https://wxterm.app${NWS_CONTACT:+; $NWS_CONTACT})"
+ua="wxterm/1.4 (+https://wxterm.app${NWS_CONTACT:+; $NWS_CONTACT})"
 id "$KIOSK_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$KIOSK_USER"
 install -d -m 2775 -o "$KIOSK_USER" -g "$KIOSK_USER" "$STATE_DIR" "$STATE_DIR/requests"
 token="$MCP_TOKEN"
@@ -41,6 +41,11 @@ umask 077
   echo "STATE_DIR=$STATE_DIR"
   echo "KIOSK_GID=$(getent group "$KIOSK_USER" | cut -d: -f3)"
   echo "WXTERM_ONLY=$LOCATIONS"
+  if [[ -n "$APRS_CALL" ]]; then
+    echo "APRS_CALL=$APRS_CALL"
+    echo "APRS_LOCATIONS=$APRS_LOCATIONS"
+    echo "APRS_RANGE_KM=$APRS_RANGE_KM"
+  fi
   if [[ "$MCP" == yes ]]; then
     echo "COMPOSE_PROFILES=mcp"
     echo "MCP_TOKEN=$token"
@@ -80,6 +85,7 @@ WXTERM_THEME=$THEME
 WXTERM_BIGFONT=$BIGFONT
 WXTERM_AIR=$AIR
 WXTERM_SPACE=$SPACE
+WXTERM_APRS_VIEW=$APRS_VIEW
 WXTERM_SHUFFLE_MIN=$SHUFFLE_MIN
 WXTERM_GIF_FPS=$GIF_FPS
 WXTERM_ONLY=$LOCATIONS

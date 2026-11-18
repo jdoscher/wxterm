@@ -426,7 +426,7 @@ class DaysPanel(Panel):
 # --- rotating extras: discussion teletype / surf / coast-to-desert ---------------------
 
 class ExtrasPanel(Panel):
-    SLOTS = (("afd", 75), ("surf", 30), ("transect", 30), ("passes", 30))
+    SLOTS = (("afd", 75), ("surf", 30), ("transect", 30), ("passes", 30), ("aprs", 30), ("aprswx", 30))
 
     @classmethod
     def available(cls, app) -> list[tuple[str, int]]:
@@ -434,6 +434,11 @@ class ExtrasPanel(Panel):
         skip = {k for k in ("afd", "marine") if ((srcs.get(k) or {}).get("data") or {}).get("unsupported")}
         if not getattr(app, "space_on", False) or getattr(app, "space_passes", None) is None:
             skip.add("passes")
+        from . import aprs   # APRS panels (Steve Miller): heard list and weather stations, when there are any
+        if not aprs.stations(app):
+            skip |= {"aprs", "aprswx"}
+        elif not any(s.get("wx") for s in aprs.stations(app)):
+            skip.add("aprswx")
         return [s for s in cls.SLOTS if not (s[0] == "afd" and "afd" in skip or s[0] == "surf" and "marine" in skip
                                              or s[0] in skip)]
 
@@ -472,6 +477,14 @@ class ExtrasPanel(Panel):
             self.typing = True
             if int(time.time() * 2) % 2 == 0:
                 c.put(3 + len(lines[-1]), len(lines), "█", t.bright)
+
+    def _aprs(self, c, t, w, h, el, dots):
+        from . import aprs
+        aprs.draw_heard(self, c, t, w, h, el, dots)
+
+    def _aprswx(self, c, t, w, h, el, dots):
+        from . import aprs
+        aprs.draw_wx(self, c, t, w, h, el, dots)
 
     def _passes(self, c, t, w, h, el, dots):
         """When the space stations can be seen from here: sunlit, in a dark sky, at least 10° up."""
@@ -611,7 +624,7 @@ class ExtrasPanel(Panel):
 
 class StatusBar(Panel):
     WATCH = (("obs", "NWS OBS"), ("forecast", "FORECAST"), ("openmeteo", "OPEN-METEO"), ("radar", "RADAR"),
-             ("tides", "TIDES"), ("marine", "MARINE"), ("afd", "DISCUSSION"))
+             ("tides", "TIDES"), ("marine", "MARINE"), ("afd", "DISCUSSION"), ("aprs", "APRS-IS"))
 
     def draw(self, c, t, w, h):
         app = self.app
@@ -626,7 +639,7 @@ class StatusBar(Panel):
                 {"radar": (getattr(app, "data", None) or {}).get("radar_meta") or {}}
             for key, label in self.WATCH:
                 ent = srcs.get(key) or {}
-                if (ent.get("data") or {}).get("unsupported"):
+                if (ent.get("data") or {}).get("unsupported") or key == "aprs" and not ent:  # APRS off here
                     continue
                 bad = self.stale(key) if key != "radar" else not ent.get("ok_at")
                 s = f"{'○' if bad or ent.get('error') else '●'} {label} {ago(ent.get('ok_at'))}"

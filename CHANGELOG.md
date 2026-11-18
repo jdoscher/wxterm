@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0 (2026-11-18)
+
+- **APRS**, contributed by [Steve Miller, KC1AWV](https://github.com/kc1awv) (thanks, Steve): with a callsign in
+  `APRS_CALL`, the home collector listens to APRS-IS around home (receive-only, passcode -1) and the map draws what it
+  hears as a fourth layer (`x`: all stations, weather stations only, off), with heard-list and weather-station panels.
+- APRS packets are read by wxterm's own parser (MIT), checked against the spec's worked examples.
+- `APRS_CALL`, `APRS_LOCATIONS`, `APRS_RANGE_KM` and `APRS_VIEW` in `kiosk.conf`; `scripts/wxctl.sh aprs off|wx|all`.
+
 ## 1.3.0 (2026-11-17)
 
 - **Spacecraft layer** (`o`, on by default, `SPACE` in `kiosk.conf`): the space stations, the brightest satellites and

@@ -6,6 +6,7 @@ GET /api/geo            coastline/border/roads/lakes polylines, airports and run
 GET /api/aircraft?dist= aircraft within dist NM of home (ADS-B, fetched on demand, cached 1.5 s)
 GET /api/routes?cs=     origin/destination for up to 8 comma-separated airline callsigns
 GET /api/tle?group=     CelesTrak orbital elements (stations, visual, starlink), cached for 6 hours
+GET /api/aprs           APRS stations heard on APRS-IS around home (positions, symbols, tracks, weather)
 GET /healthz
 """
 from __future__ import annotations
@@ -22,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import config, flights, sources, space, world
+from . import aprs, config, flights, sources, space, world
 from .radar import Radar, bbox_for
 
 log = logging.getLogger("wxcollect")
@@ -48,6 +49,8 @@ JOBS = {  # name: (function, interval seconds before WX_POLL_SCALE)
     "water_temp": (sources.fetch_water_temp, 900),
     "radar": (RADAR.refresh, 300),
 }
+if config.APRS:  # the APRS-IS connection is its own thread (aprs.start); this job publishes its status
+    JOBS["aprs"] = (aprs.summary, 30)
 WAKE = {name: threading.Event() for name in JOBS}  # set by /api/refresh to run a job now
 _last_refresh = 0.0
 
@@ -78,6 +81,8 @@ def load():
             log.info("cache is for another location; starting fresh")
             return
         STORE.update(saved)
+        if not config.APRS:  # APRS was on last run, not now
+            STORE.pop("aprs", None)
         log.info("loaded cache: %s", ", ".join(STORE))
     except (OSError, ValueError):
         pass
@@ -175,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(flights.aircraft(int(float(q.get("dist", 40)))))
                 except RuntimeError as e:  # both feeds failed: the display shows this and keeps its last picture
                     return self._send({"error": str(e)}, 502)
+            if u.path == "/api/aprs":
+                return self._send(aprs.snapshot() if config.APRS else {"enabled": False, "stations": []})
             if u.path == "/api/tle":
                 try:
                     return self._send(space.elements(q.get("group", "")))
@@ -213,6 +220,10 @@ def watch_suspend(check: float = 15, settle: float = 20):
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     load()
+    if config.APRS:
+        # listed in /api/all from the first request, so the display knows APRS is on while it connects
+        STORE.setdefault("aprs", {"data": None, "ok_at": None, "error": "connecting", "interval": 30})
+        aprs.start()
     for name in JOBS:
         threading.Thread(target=run_job, args=(name,), daemon=True, name=name).start()
     threading.Thread(target=watch_suspend, daemon=True, name="suspend").start()

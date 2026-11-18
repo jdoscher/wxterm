@@ -19,7 +19,8 @@ from collections import deque
 from datetime import datetime
 
 from .canvas import BAYER, Canvas
-from . import panels
+from . import aprs, panels
+from .canvas import Canvas as _Canvas
 from .panels import DENS, Panel, hm
 from .space import fmt_until
 
@@ -335,6 +336,8 @@ class MapPanel(Panel):
         self.order: list[str] = []                            # aircraft in traffic list order, for Tab
         self.map_rect = (0, 0, 0, 0)
         self._vis: list = []
+        self._aprs_for: tuple | None = None   # APRS stations drawn into a copy of the still map, per data update
+        self._aprs_map: tuple | None = None
 
     # geometry, also used by the app to size requests
     def map_cells(self) -> tuple[int, int, int]:
@@ -391,7 +394,8 @@ class MapPanel(Panel):
         frames = r["frames"]
         idx = min(getattr(app, "radar_idx", 0), len(frames) - 1)
         whole = (self.size.width, self.size.height, getattr(app, "air_range", DEFAULT_RANGE), self.pal.name,
-                 id(getattr(app, "geo", None)), id(r), getattr(app, "loc", ""), self.label("name"))
+                 id(getattr(app, "geo", None)), id(r), getattr(app, "loc", ""), self.label("name"),
+                 id(getattr(app, "aprs", None)), getattr(app, "aprs_view", "OFF"))
         if whole != self._still_for:
             self._still_for, self._still = whole, {}
         key = (frames[idx]["t"], idx, bool(getattr(app, "radar_paused", False)))
@@ -434,6 +438,9 @@ class MapPanel(Panel):
         space_on = getattr(app, "space_on", False)
         if space_on:
             layers.append("SPACE")
+        aprs_on = aprs.enabled(app) and getattr(app, "aprs_view", "OFF") != "OFF"
+        if aprs_on:
+            layers.append(f"APRS · {len(aprs.stations(app))}")
         title = "  ".join(layers) or "MAP"
         c.box(0, 0, w, h, t.dim, title, t.bright)
         sep = 1 + mw
@@ -454,7 +461,9 @@ class MapPanel(Panel):
             for y in range(1, h - 1):
                 c.put(sep, y, "│", t.dim)
         keys = (f" [A] AIR {'ON' if air_on else 'OFF'}  [W] RADAR {'ON' if wx_on else 'OFF'}  "
-                f"[O] SPACE {'ON' if space_on else 'OFF'}  [+/-] {rng} NM "
+                f"[O] SPACE {'ON' if space_on else 'OFF'}  "
+                + (f"[X] APRS {getattr(app, 'aprs_view', 'OFF')}  " if aprs.enabled(app) else "")
+                + f"[+/-] {rng} NM "
                 + (f" [T] TAGS {mode}  [TAB] SELECT " if air_on else ""))
         timeline = ""
         if frames:
@@ -484,6 +493,17 @@ class MapPanel(Panel):
         if key not in self._bases:
             self._bases[key] = self._build_base(t, mw, mh, P, ppn, rng, geo, fr, dens, not air_on, mark)
         base, soft, any_rain = self._bases[key]
+        if aprs_on and aprs.stations(app):   # stations drawn into a copy of the still map, kept until new data
+            akey = (id(base), id(getattr(app, "aprs", None)), app.aprs_view)  # type: ignore[attr-defined]
+            if getattr(self, "_aprs_for", None) != akey:
+                sub = _Canvas(mw, mh)
+                for name in ("chars", "cstyle", "text", "dots", "dstyle", "dprio"):
+                    setattr(sub, name, [row[:] for row in getattr(base, name)])
+                aprs.draw_stations(sub, t, aprs.stations(app), lambda lon, lat: P(lat, lon), app.aprs_view,
+                                   now)  # type: ignore[attr-defined]
+                self._aprs_for = akey
+                self._aprs_map = (sub, [bytearray(1 if v else 0 for v in row) for row in sub.text])
+            base, soft = self._aprs_map   # data tags steer around APRS labels as they do town names
         for y in range(mh):  # paste the map
             bt, bc, bs, bd, bds = base.text[y], base.chars[y], base.cstyle[y], base.dots[y], base.dstyle[y]
             for x in range(mw):

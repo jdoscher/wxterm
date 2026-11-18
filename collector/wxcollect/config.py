@@ -51,7 +51,7 @@ MAP_SPAN_LON = _f("WX_MAP_SPAN_LON", 2.6)                           # degrees of
 PORT = int(os.environ.get("WX_PORT", 8091))
 DATA_DIR = os.environ.get("WX_DATA_DIR", "/data")
 # NWS asks every client to identify itself with a contact (URL or email). Set WX_UA (kiosk.conf: NWS_CONTACT).
-UA = os.environ.get("WX_UA") or "wxterm/1.4 (+https://wxterm.app)"
+UA = os.environ.get("WX_UA") or "wxterm/1.5 (+https://wxterm.app)"
 
 # APRS stations heard on APRS-IS around home (aprs.py). Receive-only: passcode -1, nothing is ever transmitted.
 # APRS-IS still wants a login name, so set WX_APRS_CALL to your callsign (kiosk.conf APRS_CALL).

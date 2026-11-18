@@ -139,10 +139,10 @@
 <body data-theme="amber">
 
 <div class="bar"><div class="wrap">
-  <b>WXTERM</b><span class="dot">v1.4</span>
+  <b>WXTERM</b><span class="dot">v1.5</span>
   <span class="dot" id="themeName">AMBER</span>
   <nav aria-label="Sections">
-    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#air">Air</a><a href="#space">Space</a><a href="#aprs">APRS</a><a href="#kiosk">Kiosk</a><a href="#pi">Pi</a><a href="#mcp">MCP</a><a href="#data">Data</a>
+    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#air">Air</a><a href="#space">Space</a><a href="#aprs">APRS</a><a href="#hazards">Quakes</a><a href="#kiosk">Kiosk</a><a href="#pi">Pi</a><a href="#mcp">MCP</a><a href="#data">Data</a>
     <a href="https://github.com/jdoscher/wxterm">GitHub</a>
   </nav>
 </div></div>
@@ -155,7 +155,8 @@
         a line-drawn map, conditions, a 48-hour graph, tides, the moon and the forecast, in ASCII, box-drawing and
         braille.
         It runs on an old laptop as a kiosk with no desktop, or in any big terminal window.</p>
-      <p class="newline">New in 1.4: <a href="#aprs">APRS stations on the map</a>, contributed by Steve Miller, KC1AWV.
+      <p class="newline">New in 1.5: <a href="#hazards">earthquakes and wildfires on the map</a>, from free sources
+        with no keys. From 1.4: <a href="#aprs">APRS stations</a>, contributed by Steve Miller, KC1AWV.
         From 1.3: <a href="#space">spacecraft over the map</a>, and laptops can sleep with the lid shut.
         From 1.2: <a href="#air">live air traffic</a>, contributed by Justin Van Bibber.
         Still in early testing: <a href="#pi">Raspberry Pi 4 and 5 support</a>.</p>
@@ -192,6 +193,7 @@
           <dt>Tide · moon</dt><dd>The tide curve through tomorrow with every high and low, plus the moon phase, rise and set.</dd>
           <dt>5-day</dt><dd>Highs, lows, rain chance and a few words for each day.</dd>
           <dt>Spacecraft</dt><dd>The ISS, Tiangong, the brightest satellites and Starlink crossing the map with their ground tracks, a countdown to the next station overhead, and the passes you can see from home.</dd>
+          <dt>Quakes · fires</dt><dd>Earthquakes worldwide as rings sized by magnitude, US wildfires with their perimeters, size and containment, and large fires elsewhere.</dd>
           <dt>Air traffic</dt><dd>One key puts live flights on the map: aircraft as arrows with trails and data tags, runways, and the radar loop still running underneath. Contributed by Justin Van Bibber.</dd>
           <dt>Rotating</dt><dd>A panel that cycles between the forecaster's discussion, typed out like a teletype, the surf, and temperatures from the coast inland.</dd>
         </dl>
@@ -200,7 +202,7 @@
         <h2>Small touches</h2>
         <dl class="spec">
           <dt><kbd>l</kbd></dt><dd>Next location. Ten are built in: yours plus nine demo cities from San Francisco to Tokyo.</dd>
-          <dt><kbd>w</kbd> <kbd>a</kbd> <kbd>o</kbd></dt><dd>Radar, air traffic and spacecraft, each on or off. <kbd>+</kbd> <kbd>-</kbd> change the range, <kbd>Tab</kbd> picks a flight, <kbd>t</kbd> cycles the data tags.</dd>
+          <dt><kbd>w</kbd> <kbd>a</kbd> <kbd>o</kbd></dt><dd>Radar, air traffic and spacecraft, each on or off; <kbd>e</kbd> and <kbd>i</kbd> do the same for earthquakes and wildfires. <kbd>+</kbd> <kbd>-</kbd> change the range, <kbd>Tab</kbd> picks a flight, <kbd>t</kbd> cycles the data tags.</dd>
           <dt><kbd>g</kbd></dt><dd>Record exactly one radar loop as a GIF. Every GIF on this page was made that way.</dd>
           <dt><kbd>f</kbd></dt><dd>Big digits as segments, braille dots or blocks.</dd>
           <dt><kbd>s</kbd></dt><dd>Shuffle the layout. It also happens every 15 minutes, so nothing burns in.</dd>
@@ -281,6 +283,24 @@
     <p>It's receive-only: wxterm logs in to <a href="https://www.aprs-is.net">APRS-IS</a> with passcode -1, so
       nothing is ever transmitted or gated, and the filter around home is rounded so your exact location stays on the
       machine. APRS is the work of <a href="https://github.com/kc1awv">Steve Miller, KC1AWV</a>. Thanks, Steve.</p>
+  </section>
+
+  <section id="hazards">
+    <h2>Earthquakes and wildfires</h2>
+    <p>Two more layers, both on by default. Every earthquake from the past day shows as a ring sized by its
+      magnitude, bright for the first hour with its age beside it, then fading through the week, and the top border
+      names a new one as it comes in. US wildfires appear as ▲ with their name, acres and containment, with the mapped
+      fire perimeter hatched in around them. A page of the rotating panel lists the week's quakes within 300 miles,
+      and another the nearby fires. <kbd>e</kbd> and <kbd>i</kbd> switch them.</p>
+    <div class="gallery">
+      <figure><img loading="lazy" src="gifs/wxterm-sf-color-quakes.gif" width="1920" height="1080" alt="wxterm in colour at 100 nautical miles over San Francisco: rain sweeps across the Bay Area while earthquake rings mark the past day's small quakes at The Geysers and south of San Jose, and the rotating panel lists the week's earthquakes within 300 miles"><figcaption>San Francisco · colour · the day's quakes and their list</figcaption></figure>
+      <figure><img loading="lazy" src="gifs/wxterm-seattle-amber-fires.gif" width="1920" height="1080" alt="wxterm in amber at 100 nautical miles over Seattle: wildfires in the Cascades marked with triangles, each with its name, acres and containment, under a light radar loop"><figcaption>Seattle · amber · Cascade wildfires</figcaption></figure>
+    </div>
+    <p>No keys and nothing to sign up for: earthquakes come from the <a href="https://earthquake.usgs.gov/earthquakes/feed/">USGS</a>
+      and <a href="https://www.seismicportal.eu">EMSC</a>, merged so a quake both report shows once; US fires from the
+      National Interagency Fire Center's <a href="https://data-nifc.opendata.arcgis.com">WFIGS</a> service; and large fires
+      elsewhere from <a href="https://www.gdacs.org">GDACS</a>. One collector fetches the worldwide lists for the whole
+      machine, quakes every five minutes and fires every fifteen.</p>
   </section>
 
   <section id="kiosk">
@@ -379,6 +399,8 @@
         <tr><td>Surf</td><td>Open-Meteo marine</td></tr>
         <tr><td>Sun · moon</td><td>Computed locally</td></tr>
         <tr><td>Aircraft</td><td><a href="https://github.com/adsbfi/opendata">adsb.fi</a> open data, with <a href="https://api.adsb.lol">adsb.lol</a> as a fallback; routes from <a href="https://www.adsbdb.com">adsbdb</a></td></tr>
+        <tr><td>Earthquakes</td><td><a href="https://earthquake.usgs.gov/earthquakes/feed/">USGS</a> and <a href="https://www.seismicportal.eu">EMSC</a></td></tr>
+        <tr><td>Wildfires</td><td><a href="https://data-nifc.opendata.arcgis.com">NIFC WFIGS</a> in the US, <a href="https://www.gdacs.org">GDACS</a> elsewhere</td></tr>
         <tr><td>Maps</td><td><a href="https://www.naturalearthdata.com">Natural Earth</a> (public domain), <a href="https://ourairports.com/data/">OurAirports</a> runways and <a href="https://www.geonames.org">GeoNames</a> town names</td></tr>
       </tbody>
     </table>
@@ -396,7 +418,7 @@
 </main>
 
 <footer><div class="wrap">
-  <span>wxterm 1.4 · MIT license · by Jay Doscher · air traffic by <a href="https://github.com/notjvb">Justin Van Bibber</a> · APRS by <a href="https://github.com/kc1awv">Steve Miller, KC1AWV</a></span>
+  <span>wxterm 1.5 · MIT license · by Jay Doscher · air traffic by <a href="https://github.com/notjvb">Justin Van Bibber</a> · APRS by <a href="https://github.com/kc1awv">Steve Miller, KC1AWV</a></span>
   <a href="https://github.com/jdoscher/wxterm">Source on GitHub</a>
   <a href="https://github.com/jdoscher/wxterm/issues">Issues</a>
   <span>Weather data © NWS, NOAA, Open-Meteo (CC BY 4.0), RainViewer, aviationweather.gov</span>

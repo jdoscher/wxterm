@@ -54,6 +54,13 @@ LID=ignore
 # First-run spacecraft layer: on or off. Orbits come from CelesTrak a few times a day (one download per group for the
 # whole machine) and positions are worked out locally, so it adds no steady network traffic. Key o switches it.
 SPACE=on
+# First-run earthquake and wildfire layers: on or off (keys e and i switch them). Earthquakes from USGS and EMSC,
+# wildfires from NIFC (US, with perimeters) and GDACS (large fires elsewhere); free, no keys, one download per source
+# every 5 (quakes) or 15 (fires) minutes for the whole machine.
+QUAKES=on
+FIRES=on
+# Smallest earthquake drawn for the past day (older ones from M2.5). Lower it for busy fault zones' small quakes.
+QUAKE_MIN_MAG=1.5
 # Burn-in guard: shuffle the layout every N minutes (0 = off)
 SHUFFLE_MIN=15
 # GIF frame rate for the g key

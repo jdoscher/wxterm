@@ -26,7 +26,7 @@ cd "$WXTERM_DIR"
 echo "== locations + collectors"
 ls locations/*.env >/dev/null 2>&1 || { echo "no locations; add one with scripts/new-location.py"; exit 1; }
 [[ -f locations/home.env ]] || echo "   note: no locations/home.env yet. Make yours with: scripts/new-location.py home LAT LON"
-ua="wxterm/1.4 (+https://wxterm.app${NWS_CONTACT:+; $NWS_CONTACT})"
+ua="wxterm/1.5 (+https://wxterm.app${NWS_CONTACT:+; $NWS_CONTACT})"
 id "$KIOSK_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$KIOSK_USER"
 install -d -m 2775 -o "$KIOSK_USER" -g "$KIOSK_USER" "$STATE_DIR" "$STATE_DIR/requests"
 token="$MCP_TOKEN"
@@ -85,6 +85,9 @@ WXTERM_THEME=$THEME
 WXTERM_BIGFONT=$BIGFONT
 WXTERM_AIR=$AIR
 WXTERM_SPACE=$SPACE
+WXTERM_QUAKES=$QUAKES
+WXTERM_FIRES=$FIRES
+WXTERM_QUAKE_MIN_MAG=$QUAKE_MIN_MAG
 WXTERM_APRS_VIEW=$APRS_VIEW
 WXTERM_SHUFFLE_MIN=$SHUFFLE_MIN
 WXTERM_GIF_FPS=$GIF_FPS

@@ -5,6 +5,8 @@
 #   scripts/wxctl.sh radar on|off     (the radar loop on the map, same as pressing w)
 #   scripts/wxctl.sh space on|off     (spacecraft over the map, same as pressing o)
 #   scripts/wxctl.sh aprs off|wx|all  (the APRS layer, same as pressing x)
+#   scripts/wxctl.sh quakes on|off    (earthquakes on the map, same as pressing e)
+#   scripts/wxctl.sh fires on|off     (wildfires on the map, same as pressing i)
 #   scripts/wxctl.sh range 25         (5, 10, 15, 25, 40, 60 or 100 NM, like + and -)
 #   scripts/wxctl.sh tags all         (air traffic data tags: auto, all or off, like t)
 #   scripts/wxctl.sh gif              (records one radar loop to ~/gifs, same as pressing g)
@@ -12,7 +14,7 @@ set -euo pipefail
 . "$(dirname "$0")/../kiosk/lib.sh"
 state="${WXTERM_STATE:-$STATE_DIR/state.json}"
 [[ -e "$state" || -w "$(dirname "$state")" ]] || state="$HOME/.config/wxterm/state.json"
-cmd="${1:?usage: wxctl.sh location NAME | theme NAME | font NAME | air on|off | radar on|off | space on|off | aprs VIEW | range NM | tags MODE | gif | mcp}"
+cmd="${1:?usage: wxctl.sh location NAME | theme NAME | font NAME | air on|off | radar on|off | space on|off | quakes on|off | fires on|off | aprs VIEW | range NM | tags MODE | gif | mcp}"
 val="${2:-}"
 if [[ "$cmd" == mcp ]]; then   # print how to connect an LLM client to the MCP server
   envf="$WXTERM_DIR/.env"
@@ -49,7 +51,7 @@ elif cmd == "theme":
     st["theme"] = val.upper()
 elif cmd == "font":
     st["bigfont"] = val.lower()
-elif cmd in ("air", "radar", "space"):
+elif cmd in ("air", "radar", "space", "quakes", "fires"):
     if val.lower() not in ("on", "off"):
         sys.exit(f"{cmd}: on or off")
     st[cmd] = val.lower() == "on"

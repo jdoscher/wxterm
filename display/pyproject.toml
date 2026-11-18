@@ -1,6 +1,6 @@
 [project]
 name = "wxterm"
-version = "1.4.0"
+version = "1.5.0"
 description = "Full-screen ASCII/braille weather display for the terminal"
 requires-python = ">=3.11"
 dependencies = ["textual>=1.0", "pillow>=10", "sgp4>=2.23,<3", "numpy>=2,<3"]

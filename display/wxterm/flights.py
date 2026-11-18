@@ -19,7 +19,7 @@ from collections import deque
 from datetime import datetime
 
 from .canvas import BAYER, Canvas
-from . import aprs, panels
+from . import aprs, hazards, panels
 from .canvas import Canvas as _Canvas
 from .panels import DENS, Panel, hm
 from .space import fmt_until
@@ -395,7 +395,9 @@ class MapPanel(Panel):
         idx = min(getattr(app, "radar_idx", 0), len(frames) - 1)
         whole = (self.size.width, self.size.height, getattr(app, "air_range", DEFAULT_RANGE), self.pal.name,
                  id(getattr(app, "geo", None)), id(r), getattr(app, "loc", ""), self.label("name"),
-                 id(getattr(app, "aprs", None)), getattr(app, "aprs_view", "OFF"))
+                 id(getattr(app, "aprs", None)), getattr(app, "aprs_view", "OFF"),
+                 getattr(app, "quake_on", False) and id(getattr(app, "quakes", None)),
+                 getattr(app, "fire_on", False) and id(getattr(app, "fires", None)))
         if whole != self._still_for:
             self._still_for, self._still = whole, {}
         key = (frames[idx]["t"], idx, bool(getattr(app, "radar_paused", False)))
@@ -441,6 +443,11 @@ class MapPanel(Panel):
         aprs_on = aprs.enabled(app) and getattr(app, "aprs_view", "OFF") != "OFF"
         if aprs_on:
             layers.append(f"APRS · {len(aprs.stations(app))}")
+        quake_on, fire_on = getattr(app, "quake_on", False), getattr(app, "fire_on", False)
+        if quake_on:
+            layers.append("QUAKES")
+        if fire_on:
+            layers.append("FIRES")
         title = "  ".join(layers) or "MAP"
         c.box(0, 0, w, h, t.dim, title, t.bright)
         sep = 1 + mw
@@ -451,6 +458,8 @@ class MapPanel(Panel):
             stats.append("TAGS BUSY")   # too many aircraft for a tag each at this range: Tab steps through them
         if space_on:
             stats.append("")   # filled in once the spacecraft on the map are known (below)
+        if (quake_on or fire_on) and (geo or tr.home):
+            stats += hazards.border_notes(app, self.bbox(tuple(geo["home"]) if geo else tr.home), now)
         if fr:   # the timeline in the bottom border shows the frame too, so this goes first when space is short
             state = "PAUSED" if getattr(app, "radar_paused", False) else "LOOP"
             stats.append(f"{hm(datetime.fromtimestamp(fr['t'], panels.TZ))} {idx + 1}/{len(frames)} {state}")
@@ -463,6 +472,7 @@ class MapPanel(Panel):
         keys = (f" [A] AIR {'ON' if air_on else 'OFF'}  [W] RADAR {'ON' if wx_on else 'OFF'}  "
                 f"[O] SPACE {'ON' if space_on else 'OFF'}  "
                 + (f"[X] APRS {getattr(app, 'aprs_view', 'OFF')}  " if aprs.enabled(app) else "")
+                + f"[E] QUAKES {'ON' if quake_on else 'OFF'}  [I] FIRES {'ON' if fire_on else 'OFF'}  "
                 + f"[+/-] {rng} NM "
                 + (f" [T] TAGS {mode}  [TAB] SELECT " if air_on else ""))
         timeline = ""
@@ -493,17 +503,31 @@ class MapPanel(Panel):
         if key not in self._bases:
             self._bases[key] = self._build_base(t, mw, mh, P, ppn, rng, geo, fr, dens, not air_on, mark)
         base, soft, any_rain = self._bases[key]
-        if aprs_on and aprs.stations(app):   # stations drawn into a copy of the still map, kept until new data
-            akey = (id(base), id(getattr(app, "aprs", None)), app.aprs_view)  # type: ignore[attr-defined]
-            if getattr(self, "_aprs_for", None) != akey:
+        aprs_draw = aprs_on and bool(aprs.stations(app))
+        quake_draw = quake_on and bool(hazards.quake_list(app))
+        fire_draw = fire_on and bool(hazards.fire_list(app) or hazards.perim_list(app))
+        if aprs_draw or quake_draw or fire_draw:
+            # fires, quakes and APRS stations are drawn into a copy of the still map, kept until new data; data
+            # tags then steer around their labels as they do town names
+            okey = (id(base), aprs_draw and (id(getattr(app, "aprs", None)), app.aprs_view),  # type: ignore
+                    quake_draw and id(getattr(app, "quakes", None)), fire_draw and id(getattr(app, "fires", None)))
+            if getattr(self, "_aprs_for", None) != okey:
                 sub = _Canvas(mw, mh)
                 for name in ("chars", "cstyle", "text", "dots", "dstyle", "dprio"):
                     setattr(sub, name, [row[:] for row in getattr(base, name)])
-                aprs.draw_stations(sub, t, aprs.stations(app), lambda lon, lat: P(lat, lon), app.aprs_view,
-                                   now)  # type: ignore[attr-defined]
-                self._aprs_for = akey
+
+                def proj(lon, lat):
+                    return P(lat, lon)
+
+                if fire_draw:
+                    hazards.draw_fires(sub, t, hazards.fire_list(app), hazards.perim_list(app), proj)
+                if quake_draw:
+                    hazards.draw_quakes(sub, t, hazards.quake_list(app), proj, now)
+                if aprs_draw:
+                    aprs.draw_stations(sub, t, aprs.stations(app), proj, app.aprs_view, now)  # type: ignore
+                self._aprs_for = okey
                 self._aprs_map = (sub, [bytearray(1 if v else 0 for v in row) for row in sub.text])
-            base, soft = self._aprs_map   # data tags steer around APRS labels as they do town names
+            base, soft = self._aprs_map
         for y in range(mh):  # paste the map
             bt, bc, bs, bd, bds = base.text[y], base.chars[y], base.cstyle[y], base.dots[y], base.dstyle[y]
             for x in range(mw):

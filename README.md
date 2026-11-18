@@ -27,15 +27,17 @@ collectors (Docker, one per location, localhost:8091+)  ── JSON ──>  dis
 ```
 
 ## Features
-- **One map, four layers.** The map (coast, borders, highways, towns, runways and airport codes) is centred on home
-  with range rings, from 5 to 100 NM. The **radar loop** (`w`), live **air traffic** (`a`), **spacecraft** (`o`)
-  and **APRS** stations (`x`) each switch on and off on their own.
+- **One map, six layers.** The map (coast, borders, highways, towns, runways and airport codes) is centred on home
+  with range rings, from 5 to 100 NM. The **radar loop** (`w`), live **air traffic** (`a`), **spacecraft** (`o`),
+  **APRS** stations (`x`), **earthquakes** (`e`) and **wildfires** (`i`) each switch on and off on their own.
 - **Air traffic** (contributed by [Justin Van Bibber](https://github.com/notjvb)): live ADS-B aircraft as arrows with
   trails and data tags, a traffic list and the selected flight's details
 - **Spacecraft:** the space stations, the brightest satellites and Starlink as they cross the map, with ground
   tracks, a countdown to the next station overhead, and the stations' visible passes
 - **APRS** (contributed by [Steve Miller, KC1AWV](https://github.com/kc1awv)): stations heard on APRS-IS around home,
   receive-only, with weather stations' temperatures, tracks and a heard list (needs a callsign)
+- **Earthquakes and wildfires:** quakes worldwide as rings sized by magnitude (USGS and EMSC), US wildfires with their
+  mapped perimeters, size and containment (NIFC), and large fires elsewhere (GDACS). Free, no keys
 - **Now:** temperature in seven-segment digits, conditions, wind, pressure trend, alerts (US)
 - **48 hours:** temperature and dew point lines with rain-chance bars
 - **Tides and moon:** tide curve with highs and lows, plus moon phase, rise and set, and the next full and new moon
@@ -69,6 +71,8 @@ Use a terminal of at least 160x45. It's designed for 240x62, which is 1920x1080 
 | `a` | air traffic on/off |
 | `o` | spacecraft on/off |
 | `x` | APRS: all stations, weather stations only, off (when APRS is set up) |
+| `e` | earthquakes on/off |
+| `i` | wildfires on/off |
 | `+` `-` | range: 5, 10, 15, 25, 40, 60 or 100 NM from home to the nearest edge (40 to start) |
 | `g` | save a GIF of one radar loop (10 s with the radar off) to `~/gifs` |
 | `s` | shuffle the layout now |
@@ -108,6 +112,8 @@ change `kiosk.conf`. Every setting:
 | `THEME` | `amber` | first-run theme; `c` changes it and the choice is saved |
 | `BIGFONT` | `segment` | first-run digit style; `f` changes it |
 | `AIR` | `off` | first-run air traffic: `on` or `off` (it polls the ADS-B feeds every 2.5 s while on); `a` changes it |
+| `QUAKES`, `FIRES` | `on`, `on` | first-run earthquake and wildfire layers; `e` and `i` change them |
+| `QUAKE_MIN_MAG` | `1.5` | smallest quake drawn for the past day (older ones from M2.5) |
 | `APRS_CALL` | none | your callsign turns on APRS (receive-only); blank = off |
 | `APRS_LOCATIONS`, `APRS_RANGE_KM` | first location, `150` | which collectors connect to APRS-IS, and the filter radius |
 | `APRS_VIEW` | `all` | first-run APRS layer: `all`, `wx` or `off`; `x` changes it |
@@ -238,6 +244,25 @@ official observation.
 - Packets are read by wxterm's own small parser (`collector/wxcollect/aprsparse.py`: positions, compressed positions,
   Mic-E, objects, items, weather, status), so the project stays MIT throughout.
 
+## Earthquakes and wildfires
+Both layers are on unless `QUAKES=off` or `FIRES=off`; `e` and `i` switch them. Every source is free and needs no key.
+
+- **Earthquakes** come from the [USGS](https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php) feeds (every
+  size for the past day, M2.5+ for the week, worldwide) merged with [EMSC](https://www.seismicportal.eu) (M2+
+  worldwide, often first outside the US). A quake both report within a minute and 100 km is shown once, from USGS.
+  On the map each is a ring sized by magnitude: bright in the first hour (with its age, `M4.2 6M AGO`), normal for the
+  day and dim for the rest of the week. The day's quakes are drawn from `QUAKE_MIN_MAG` (M1.5) and older ones from
+  M2.5. The top border names a new one (`M4.2 QUAKE 6M AGO`) or counts the day's.
+- **Wildfires** in the US come from the National Interagency Fire Center's
+  [WFIGS](https://data-nifc.opendata.arcgis.com) service: every wildfire incident (no prescribed burns) as ▲ with its
+  name, acres and containment, and the mapped perimeters as hatched outlines. Fires that are fully contained and
+  haven't been updated for 3 days are left off. Outside the US, [GDACS](https://www.gdacs.org) (the UN and EU global
+  disaster alert system) adds the large fires it tracks, with their burnt area in hectares.
+- **In the rotating panel:** the past week's earthquakes within 300 miles (newest first, with depth, distance and
+  direction, and the day's largest anywhere), and a wildfire page when a fire is within 300 miles.
+- **Network:** the first location's collector fetches the worldwide lists for everyone, quakes every 5 minutes and
+  fires every 15, only while a display asks for them, and keeps the last good copy on disk if a source is down.
+
 ## MCP server (let an LLM read it)
 With `MCP=yes` in `kiosk.conf`, setup runs a small read-only [MCP](https://modelcontextprotocol.io) server in Docker
 at `http://KIOSK:8090/mcp`. Ask your assistant "is rain heading my way?", "when's the next high tide?" or "is the
@@ -258,6 +283,7 @@ Claude Desktop and other stdio-only clients connect through `npx mcp-remote` (th
 | `get_tides_moon_sun` | tide now and the next highs/lows, water temperature, moon, sun and golden hour |
 | `get_alerts`, `get_forecast_discussion` | full NWS alert text and the forecaster's discussion (US) |
 | `get_marine`, `get_transect` | surf and swell; temperatures from the coast inland |
+| `get_hazards` | earthquakes (past week) and wildfires within a radius, with the day's largest quake anywhere |
 | `get_status` | display state and layout, freshness of every data source, CPU, memory, temperatures, battery, disk |
 | `screenshot` | a PNG of the screen (half or full size) |
 
@@ -314,6 +340,8 @@ skipped. Every `.env` key is documented in `collector/wxcollect/config.py`.
 | Flight routes | [adsbdb](https://www.adsbdb.com) | on demand, cached 6 h |
 | APRS stations | [APRS-IS](https://www.aprs-is.net) (receive-only, needs a callsign) | live |
 | Spacecraft orbits | [CelesTrak](https://celestrak.org/NORAD/elements/) (stations, visual, Starlink), propagated locally with [sgp4](https://pypi.org/project/sgp4/) | 6 h, one collector |
+| Earthquakes | [USGS](https://earthquake.usgs.gov/earthquakes/feed/) and [EMSC](https://www.seismicportal.eu) | 5 min, one collector |
+| Wildfires | [NIFC WFIGS](https://data-nifc.opendata.arcgis.com) (US incidents and perimeters), [GDACS](https://www.gdacs.org) (elsewhere) | 15 min, one collector |
 | Town names (`new-location.py`) | [GeoNames](https://www.geonames.org) cities over 5,000 people (CC BY 4.0) | static |
 
 adsb.fi's open data is free for personal, non-commercial use. RainViewer's free API serves zoom 7 at most and only
@@ -328,11 +356,13 @@ data is CC BY 4.0.
 - `python -m wxterm.snap OUTDIR 240 67 [themes...]` (with `WXTERM_LOCATION=sf`) renders the screen headless to SVG
   and fails if any panel shows an error. `WXTERM_AIR=on` adds air traffic to the map.
 - Collector API, per location (localhost only): `GET /api/all`, `/api/radar?w=&h=` (optional `&bbox=` and `&last=N`
-  frames), `/api/geo`, `/api/aircraft?dist=NM`, `/api/routes?cs=UAL1,DAL2`, `/api/tle?group=stations`, `/api/aprs`, `/api/refresh`, `/healthz`.
+  frames), `/api/geo`, `/api/aircraft?dist=NM`, `/api/routes?cs=UAL1,DAL2`, `/api/tle?group=stations`, `/api/aprs`,
+  `/api/quakes`, `/api/fires`, `/api/refresh`, `/healthz`.
 - MCP server: `mcp/wxmcp/` (`weather.py` turns collector JSON into summaries, `system.py` reads machine stats,
   `server.py` holds the tools and the auth guard). The display's side is `display/wxterm/remote.py`.
 - Layout: `display/wxterm/app.py`. Panels: `panels.py`, and the map with its radar and air traffic layers in
-  `flights.py` (with the collector side in `collector/wxcollect/flights.py`). Braille canvas: `canvas.py`. Themes: `themes.py`.
+  `flights.py` (with the collector side in `collector/wxcollect/flights.py`). Earthquakes and wildfires: `hazards.py`
+  on both sides. Braille canvas: `canvas.py`. Themes: `themes.py`.
 
 ## License
 MIT. See [LICENSE](LICENSE).

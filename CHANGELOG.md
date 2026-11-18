@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.0 (2026-11-18)
+Earthquakes and wildfires on the map, from free sources with no keys.
+
+- **Earthquakes** (`e`): USGS and EMSC worldwide, merged so a quake both report shows once. Rings sized by magnitude,
+  bright for the first hour, then fading over the week; the top border names a new quake. A rotating panel page lists
+  the past week's quakes within 300 miles and the day's largest anywhere.
+- **Wildfires** (`i`): every US wildfire incident from NIFC with its name, acres and containment, and the mapped
+  perimeters as hatched outlines; large fires elsewhere from GDACS. A panel page lists fires within 300 miles.
+- One collector fetches the worldwide lists for the whole machine (quakes every 5 minutes, fires every 15) and keeps
+  the last good copy if a source is down.
+- MCP: new `get_hazards` tool; `get_status` reports the two layers.
+- Settings: `QUAKES`, `FIRES`, `QUAKE_MIN_MAG`. `scripts/wxctl.sh quakes|fires on|off`.
+
 ## 1.4.0 (2026-11-18)
 
 - **APRS**, contributed by [Steve Miller, KC1AWV](https://github.com/kc1awv) (thanks, Steve): with a callsign in

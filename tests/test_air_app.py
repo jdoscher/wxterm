@@ -43,6 +43,7 @@ class FakeCollector:
     def __init__(self):
         self.aircraft_calls: list[int] = []
         self.tle_calls: list[str] = []
+        self.hazard_calls: list[tuple[str, str]] = []
         self.fail_aircraft = False
 
     def __call__(self, base, path, timeout=15):
@@ -79,6 +80,20 @@ class FakeCollector:
         if u.path == "/api/routes":
             known = {"UAL123": {"airline": "United Airlines", "iata": "UA123", "origin": SFO, "dest": ORD}}
             return {cs: known.get(cs) for cs in q["cs"].split(",")}
+        if u.path == "/api/quakes":
+            self.hazard_calls.append(("quakes", base))
+            now = time.time()
+            return {"fetched": now, "checked": now, "error": None, "sources": ["USGS"], "quakes": [
+                {"id": "q1", "t": now - 300, "lat": HOME[0] + 0.15, "lon": HOME[1] + 0.2, "depth_km": 7.0,
+                 "mag": 4.1, "mag_type": "ml", "place": "5 km E of Testville", "src": "USGS", "felt": 3,
+                 "tsunami": False, "alert": None}]}
+        if u.path == "/api/fires":
+            self.hazard_calls.append(("fires", base))
+            now = time.time()
+            return {"fetched": now, "checked": now, "error": None, "sources": ["NIFC"], "perimeters": [], "fires": [
+                {"id": "f1", "name": "MOUNTAIN", "lat": HOME[0] - 0.2, "lon": HOME[1] + 0.25, "acres": 1200,
+                 "ha": None, "contained": 35, "discovered": now - 86400, "updated": now, "src": "NIFC",
+                 "country": "US"}]}
         raise AssertionError(f"unexpected collector call {path}")
 
 
@@ -140,7 +155,8 @@ def test_starts_with_radar_on_air_traffic_off_and_fetches_no_aircraft(env):
         assert env.aircraft_calls == []
         s = text(app)
         assert "RADAR · TEST" in s and "AIR TRAFFIC" not in s and "DBZ 10" in s and "ERROR" not in s
-        assert "[A] AIR OFF  [W] RADAR ON  [O] SPACE ON  [+/-] 40 NM" in s and "FLIGHT   TYPE" not in s
+        assert "[A] AIR OFF  [W] RADAR ON  [O] SPACE ON  [E] QUAKES ON  [I] FIRES ON  [+/-] 40 NM" in s
+        assert "FLIGHT   TYPE" not in s
     run(scenario)
 
 
@@ -184,7 +200,7 @@ def test_w_turns_the_radar_off_and_on(env):
 def test_all_layers_off_leaves_the_bare_map(env):
     async def scenario(app, pilot):
         await radar_ready(app, pilot)
-        await pilot.press("w", "o")
+        await pilot.press("w", "o", "e", "i")
         await pilot.pause(0.4)
         s = text(app)
         assert " MAP " in s.split("\n")[0] and "⌂ TESTVILLE" in s and "OAKLAND" in s and "SFO" in s and "ERROR" not in s
@@ -372,13 +388,15 @@ def test_status_file_reports_the_layers(env):
         await to_air(app, pilot)
         app._write_status()
         st = json.loads((env.state.parent / "display-status.json").read_text())
-        assert st["layers"] == {"radar": True, "air": True, "space": True} and st["range_nm"] == F.DEFAULT_RANGE
+        assert st["layers"] == {"radar": True, "air": True, "space": True, "quakes": True, "fires": True}
+        assert st["range_nm"] == F.DEFAULT_RANGE
         assert st["layout"]["map"] in ("left", "right")
         assert st["air"]["aircraft"] == len(AIRCRAFT) and st["air"]["feed"] == "ADSB.FI"
         await pilot.press("a")
         app._write_status()
         st = json.loads((env.state.parent / "display-status.json").read_text())
-        assert st["layers"] == {"radar": True, "air": False, "space": True} and st["air"] is None
+        assert st["layers"] == {"radar": True, "air": False, "space": True, "quakes": True,
+                                "fires": True} and st["air"] is None
     run(scenario)
 
 
@@ -476,4 +494,50 @@ def test_the_passes_panel(env):
         assert "VISIBLE FROM TESTVILLE" in s and "ISS" in s and "62°" in s and "SW → NE" in s and "10 MIN" in s
         assert "TIANGONG" not in s.split("NEXT OVER")[0]           # not visible: not listed
         assert "NEXT OVER THE MAP: ISS" in s
+    run(scenario)
+
+
+# --- earthquakes and wildfires -------------------------------------------------------------------------------------
+
+def test_quakes_and_fires_are_on_by_default_and_drawn_on_the_map(env):
+    async def scenario(app, pilot):
+        assert app.quake_on and app.fire_on
+        await wait_for(pilot, lambda: app.quakes is not None and app.fires is not None)
+        assert {w for w, _ in env.hazard_calls} == {"quakes", "fires"}
+        await wait_for(pilot, lambda: "M4.1 5M AGO" in text(app))
+        s = text(app)
+        top = s.split("\n")[0]
+        assert " QUAKES " in top and " FIRES" in top and "M4.1 QUAKE 5M AGO" in top and "1 FIRE" in top
+        assert "▲" in s and "MOUNTAIN 1,200 AC 35%" in s and "ERROR" not in s
+    run(scenario)
+
+
+def test_e_and_i_switch_the_layers_and_are_saved(env):
+    async def scenario(app, pilot):
+        await wait_for(pilot, lambda: "M4.1" in text(app))
+        await pilot.press("e")
+        await pilot.pause(0.3)
+        s = text(app)
+        assert not app.quake_on and "M4.1" not in s and "[E] QUAKES OFF" in s and "MOUNTAIN" in s
+        await pilot.press("i")
+        await pilot.pause(0.3)
+        s = text(app)
+        assert not app.fire_on and "MOUNTAIN" not in s and "[I] FIRES OFF" in s
+        assert saved(env)["quakes"] is False and saved(env)["fires"] is False
+        n = len(env.hazard_calls)
+        app._fetch_quakes_bg()
+        app._fetch_fires_bg()
+        await pilot.pause(0.3)
+        assert len(env.hazard_calls) == n   # nothing is fetched while the layers are off
+    run(scenario)
+
+
+def test_hazard_layers_can_start_off(env, monkeypatch):
+    monkeypatch.setenv("WXTERM_QUAKES", "off")
+    monkeypatch.setenv("WXTERM_FIRES", "off")
+
+    async def scenario(app, pilot):
+        await pilot.pause(0.5)
+        assert not app.quake_on and not app.fire_on and env.hazard_calls == []
+        assert "[E] QUAKES OFF  [I] FIRES OFF" in text(app)
     run(scenario)

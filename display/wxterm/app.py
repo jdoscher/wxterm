@@ -1,7 +1,8 @@
 """wxterm: full-screen terminal weather display. Talks to one wxterm collector per location (see api.locations()).
 
 The big map (MapPanel, flights.py) has three layers, each switched on and off on its own: the radar loop (`w`), live
-air traffic (`a`), spacecraft overhead (`o`, space.py) and APRS stations (`x`, aprs.py, by Steve Miller)."""
+air traffic (`a`), spacecraft overhead (`o`, space.py), APRS stations (`x`, aprs.py, by Steve Miller), and
+earthquakes (`e`) and wildfires (`i`, hazards.py)."""
 from __future__ import annotations
 
 import json
@@ -45,7 +46,8 @@ class WxApp(App):
                 ("f", "cycle_font", "Big font"), ("s", "shuffle", "Shuffle layout"),
                 # map layers and range
                 ("a", "toggle_air", "Air traffic"), ("w", "toggle_radar", "Radar"), ("o", "toggle_space", "Spacecraft"),
-                ("x", "cycle_aprs", "APRS"),
+                ("x", "cycle_aprs", "APRS"), ("e", "toggle_quakes", "Earthquakes"),
+                ("i", "toggle_fires", "Wildfires"),
                 ("plus,equals_sign", "zoom(-1)", "Zoom in"), ("minus,underscore", "zoom(1)", "Zoom out"),
                 # air traffic only; these do nothing while it's off
                 ("t", "air_tags", "Data tags"),
@@ -112,6 +114,12 @@ class WxApp(App):
         view = (st.get("aprs_view") or os.environ.get("WXTERM_APRS_VIEW") or "ALL").upper()
         self.aprs_view = view if view in aprs.VIEWS else "ALL"
         self.aprs: dict | None = None
+        # earthquakes and wildfires: on unless turned off; worldwide lists from the first location's collector
+        qk, fi = st.get("quakes"), st.get("fires")
+        self.quake_on = qk if isinstance(qk, bool) else os.environ.get("WXTERM_QUAKES", "on").lower() in ON
+        self.fire_on = fi if isinstance(fi, bool) else os.environ.get("WXTERM_FIRES", "on").lower() in ON
+        self.quakes: dict | None = None
+        self.fires: dict | None = None
 
     @property
     def pal(self):
@@ -158,6 +166,10 @@ class WxApp(App):
         self.set_interval(600, self._space_slow)
         self.set_interval(3 * 3600, self._space_fetch)
         self.set_interval(20, self._fetch_aprs_bg)
+        self.set_interval(300, self._fetch_quakes_bg)
+        self.set_interval(900, self._fetch_fires_bg)
+        self.call_after_refresh(self._fetch_quakes_bg)
+        self.call_after_refresh(self._fetch_fires_bg)
         self.call_after_refresh(self._space_fetch)
         if self.SHUFFLE_MIN > 0:
             self.set_interval(self.SHUFFLE_MIN * 60, self.action_shuffle)
@@ -183,6 +195,7 @@ class WxApp(App):
             tmp.write_text(json.dumps({"theme": self.pal.name, "location": self.loc, "bigfont": self.bigfont,
                                        "gif": self._gif_token, "air": self.air_on, "radar": self.radar_on,
                                        "space": self.space_on, "aprs_view": self.aprs_view,
+                                       "quakes": self.quake_on, "fires": self.fire_on,
                                        "air_range": self.air_range, "air_tags": self.air_tags}))
             tmp.replace(STATE)
             self._state_mtime = self._mtime()
@@ -199,7 +212,8 @@ class WxApp(App):
             "cells": [self.size.width, self.size.height],
             "location": self.loc, "theme": self.pal.name, "bigfont": self.bigfont,
             "radar_paused": self.radar_paused, "radar_frames": len(frames), "recording_gif": self._recording,
-            "layers": {"radar": self.radar_on, "air": self.air_on, "space": self.space_on},
+            "layers": {"radar": self.radar_on, "air": self.air_on, "space": self.space_on,
+                       "quakes": self.quake_on, "fires": self.fire_on},
             "range_nm": self.air_range,
             "aprs": {"view": self.aprs_view, "stations": len(aprs.stations(self)),
                      "error": ((self.data or {}).get("sources", {}).get("aprs") or {}).get("error")}
@@ -244,6 +258,10 @@ class WxApp(App):
             self._set_aprs_view(st["aprs_view"], save=False)
         if isinstance(st.get("space"), bool) and st["space"] != self.space_on:
             self._set_space_layer(st["space"], save=False)
+        if isinstance(st.get("quakes"), bool) and st["quakes"] != self.quake_on:
+            self._set_hazard_layer("quakes", st["quakes"], save=False)
+        if isinstance(st.get("fires"), bool) and st["fires"] != self.fire_on:
+            self._set_hazard_layer("fires", st["fires"], save=False)
         if st.get("air_range") in RANGES and st["air_range"] != self.air_range:
             self._set_range(st["air_range"], save=False)   # saving here would write back the other old values
         if st.get("air_tags") in TAG_MODES and st["air_tags"] != self.air_tags:
@@ -401,6 +419,55 @@ class WxApp(App):
             self._space_slow()
         self.refresh_all()
 
+    def action_toggle_quakes(self):
+        self._set_hazard_layer("quakes", not self.quake_on)
+
+    def action_toggle_fires(self):
+        self._set_hazard_layer("fires", not self.fire_on)
+
+    def _set_hazard_layer(self, which: str, on: bool, save: bool = True):
+        if which == "quakes":
+            self.quake_on = on
+        else:
+            self.fire_on = on
+        if save:
+            self._save_state()
+        if on:
+            (self._fetch_quakes_bg if which == "quakes" else self._fetch_fires_bg)()
+        self.refresh_all()
+
+    def _fetch_quakes_bg(self):
+        self._fetch_hazard("quakes")
+
+    def _fetch_fires_bg(self):
+        self._fetch_hazard("fires")
+
+    def _fetch_hazard(self, which: str):
+        """Worldwide earthquake or wildfire lists, from the first location's collector (one download per source
+        for the whole house), falling back to this location's. Only while the layer is on."""
+        if not (self.quake_on if which == "quakes" else self.fire_on):
+            return
+        bases = [self.locs[0][1]] + ([self.base] if self.base != self.locs[0][1] else [])
+
+        def work():
+            for base in bases:
+                try:
+                    j = api.get(base, f"/api/{which}", timeout=90)
+                except Exception:  # noqa: BLE001 - try the next collector; asked again at the next round
+                    continue
+                if j.get(which) is not None:
+                    self.call_from_thread(self._set_hazard, which, j)
+                    return
+
+        self.run_worker(work, thread=True, group=which, exclusive=True)
+
+    def _set_hazard(self, which: str, j: dict):
+        old = getattr(self, which)
+        if old and old.get("fetched") == j.get("fetched") and old.get("checked") == j.get("checked"):
+            return   # nothing new: keep the same object so the map's cached frames stay valid
+        setattr(self, which, j)
+        self._refresh_map()
+
     def action_cycle_aprs(self):
         self._set_aprs_view(aprs.VIEWS[(aprs.VIEWS.index(self.aprs_view) + 1) % len(aprs.VIEWS)])
 
@@ -484,7 +551,8 @@ class WxApp(App):
     def check_action(self, action: str, parameters) -> bool | None:
         """Map keys stay out of dialogs, and air traffic keys only act while it's on; otherwise Tab and Escape keep
         their usual jobs."""
-        if action.startswith("air_") or action in ("toggle_air", "toggle_radar", "toggle_space", "cycle_aprs", "zoom"):
+        if action.startswith("air_") or action in ("toggle_air", "toggle_radar", "toggle_space", "cycle_aprs", "zoom",
+                                                   "toggle_quakes", "toggle_fires"):
             if len(self.screen_stack) > 1:
                 return False
             if action.startswith("air_") and not self.air_on:

@@ -7,6 +7,8 @@ GET /api/aircraft?dist= aircraft within dist NM of home (ADS-B, fetched on deman
 GET /api/routes?cs=     origin/destination for up to 8 comma-separated airline callsigns
 GET /api/tle?group=     CelesTrak orbital elements (stations, visual, starlink), cached for 6 hours
 GET /api/aprs           APRS stations heard on APRS-IS around home (positions, symbols, tracks, weather)
+GET /api/quakes         earthquakes worldwide, past week (USGS + EMSC), cached 5 min
+GET /api/fires          wildfires: US incidents and perimeters (NIFC), large ones elsewhere (GDACS), cached 15 min
 GET /healthz
 """
 from __future__ import annotations
@@ -23,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import aprs, config, flights, sources, space, world
+from . import aprs, config, flights, hazards, sources, space, world
 from .radar import Radar, bbox_for
 
 log = logging.getLogger("wxcollect")
@@ -189,6 +191,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send({"error": str(e)}, 400)
                 except LookupError as e:
                     return self._send({"error": str(e)}, 502)
+            if u.path == "/api/quakes":
+                return self._send(hazards.quakes())
+            if u.path == "/api/fires":
+                return self._send(hazards.fires())
             if u.path == "/api/routes":
                 return self._send(flights.routes(q.get("cs", "").split(",")))
             if u.path == "/api/geo":

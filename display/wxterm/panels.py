@@ -426,7 +426,8 @@ class DaysPanel(Panel):
 # --- rotating extras: discussion teletype / surf / coast-to-desert ---------------------
 
 class ExtrasPanel(Panel):
-    SLOTS = (("afd", 75), ("surf", 30), ("transect", 30), ("passes", 30), ("aprs", 30), ("aprswx", 30))
+    SLOTS = (("afd", 75), ("surf", 30), ("transect", 30), ("passes", 30), ("aprs", 30), ("aprswx", 30),
+             ("quakes", 30), ("fires", 30))
 
     @classmethod
     def available(cls, app) -> list[tuple[str, int]]:
@@ -439,6 +440,12 @@ class ExtrasPanel(Panel):
             skip |= {"aprs", "aprswx"}
         elif not any(s.get("wx") for s in aprs.stations(app)):
             skip.add("aprswx")
+        from . import hazards   # earthquake page while that layer is on; wildfire page when one is near
+        if not getattr(app, "quake_on", False) or not getattr(app, "quakes", None):
+            skip.add("quakes")
+        home = ((getattr(app, "geo", None) or {}).get("home"))
+        if not getattr(app, "fire_on", False) or not home or not hazards.near(hazards.fire_list(app), home):
+            skip.add("fires")
         return [s for s in cls.SLOTS if not (s[0] == "afd" and "afd" in skip or s[0] == "surf" and "marine" in skip
                                              or s[0] in skip)]
 
@@ -485,6 +492,14 @@ class ExtrasPanel(Panel):
     def _aprswx(self, c, t, w, h, el, dots):
         from . import aprs
         aprs.draw_wx(self, c, t, w, h, el, dots)
+
+    def _quakes(self, c, t, w, h, el, dots):
+        from . import hazards
+        hazards.draw_quake_page(self, c, t, w, h, el, dots)
+
+    def _fires(self, c, t, w, h, el, dots):
+        from . import hazards
+        hazards.draw_fire_page(self, c, t, w, h, el, dots)
 
     def _passes(self, c, t, w, h, el, dots):
         """When the space stations can be seen from here: sunlit, in a dark sky, at least 10° up."""

@@ -415,6 +415,67 @@ def radar(name: str) -> dict:
     return out
 
 
+def hazards(name: str, radius_mi: float = 300) -> dict:
+    """Earthquakes (past week) and wildfires within radius_mi of the location, plus the day's largest quake
+    anywhere. The worldwide lists come from the first location's collector, as on the display."""
+    d = everything(name)
+    tz = _tz(d)
+    home = d.get("home") or {}
+    lat, lon = home.get("lat"), home.get("lon")
+    radius_mi = max(10.0, min(float(radius_mi), 1000.0))
+    first = (locations() or [{"name": name}])[0]["name"]
+    try:
+        qd = _get(first, "/api/quakes", timeout=60)
+    except WxError:
+        qd = _get(name, "/api/quakes", timeout=60)
+    try:
+        fd = _get(first, "/api/fires", timeout=60)
+    except WxError:
+        fd = _get(name, "/api/fires", timeout=60)
+    now = time.time()
+
+    def near(rows):
+        out = []
+        for r in rows or []:
+            km = _km(lat, lon, r["lat"], r["lon"])
+            if km / 1.609 <= radius_mi:
+                out.append((km, r))
+        return out
+
+    quakes = sorted(near(q for q in qd.get("quakes") or [] if q["mag"] >= (1.5 if now - q["t"] < 86400 else 2.5)),
+                    key=lambda v: -v[1]["t"])
+    today = [q for q in qd.get("quakes") or [] if now - q["t"] < 86400]
+    big = max(today, key=lambda q: q["mag"]) if today else None
+    fires = sorted(near(fd.get("fires") or []), key=lambda v: v[0])
+
+    def when(t):
+        return _local(datetime.fromtimestamp(t).astimezone().isoformat(), tz) if t else None
+
+    return _header(name, d) | {
+        "radius_mi": round(radius_mi),
+        "earthquakes": {
+            "sources": qd.get("sources"), "error": qd.get("error"), "count_past_week": len(quakes),
+            "largest_worldwide_today": {"mag": big["mag"], "place": big["place"], "time": when(big["t"])}
+            if big else None,
+            "near": [{"mag": q["mag"], "time": when(q["t"]), "hours_ago": round((now - q["t"]) / 3600, 1),
+                      "place": q["place"],
+                      "depth_km": round(q["depth_km"], 1) if q.get("depth_km") is not None else None,
+                      "distance_mi": round(km / 1.609),
+                      "direction": _bearing(lat, lon, q["lat"], q["lon"]), "felt_reports": q.get("felt"),
+                      "tsunami": q.get("tsunami") or None, "source": q["src"]} for km, q in quakes[:25]],
+        },
+        "wildfires": {
+            "sources": fd.get("sources"), "error": fd.get("error"), "count": len(fires),
+            "note": "US fires with size and containment from NIFC; large fires elsewhere from GDACS",
+            "near": [{"name": f["name"].title() if f["src"] == "NIFC" else f"Wildfire ({f.get('country')})",
+                      "acres": f.get("acres"), "hectares": f.get("ha"), "percent_contained": f.get("contained"),
+                      "discovered": when(f.get("discovered")), "distance_mi": round(km / 1.609),
+                      "direction": _bearing(lat, lon, f["lat"], f["lon"]), "source": f["src"]}
+                     for km, f in fires[:25]],
+        },
+    }
+
+
 def health(name: str) -> dict:
     """Per-source freshness: ok, stale (older than 2x its interval), or error."""
     d = everything(name)

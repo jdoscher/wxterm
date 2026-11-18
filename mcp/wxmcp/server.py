@@ -28,7 +28,7 @@ from . import system, weather
 from .weather import STATE_DIR, WxError
 
 log = logging.getLogger("wxmcp")
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 PORT = int(os.environ.get("WXMCP_PORT", "8090"))
 RATE_PER_MIN = int(os.environ.get("WXMCP_RATE_PER_MIN", "120"))
 SHOT_GAP_S = 3.0
@@ -114,6 +114,14 @@ async def get_marine(location: str | None = None) -> dict:
 async def get_transect(location: str | None = None) -> dict:
     """Temperatures along a line from the coast (or west) through the location and inland, with elevations."""
     return await _run(lambda: weather.transect(weather.resolve(location)))
+
+
+@mcp.tool(annotations=RO)
+async def get_hazards(location: str | None = None, radius_mi: int = 300) -> dict:
+    """Earthquakes from the past week and active wildfires within radius_mi (10-1000) of the location, nearest and
+    newest first, with magnitude, depth, size and containment, plus the day's largest earthquake anywhere. Sources:
+    USGS and EMSC (quakes), NIFC (US fires) and GDACS (large fires elsewhere)."""
+    return await _run(lambda: weather.hazards(weather.resolve(location), radius_mi))
 
 
 @mcp.tool(annotations=RO)

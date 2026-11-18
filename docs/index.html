@@ -139,10 +139,10 @@
 <body data-theme="amber">
 
 <div class="bar"><div class="wrap">
-  <b>WXTERM</b><span class="dot">v1.2</span>
+  <b>WXTERM</b><span class="dot">v1.3</span>
   <span class="dot" id="themeName">AMBER</span>
   <nav aria-label="Sections">
-    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#air">Air</a><a href="#kiosk">Kiosk</a><a href="#pi">Pi</a><a href="#mcp">MCP</a><a href="#data">Data</a>
+    <a href="#screen">Screen</a><a href="#install">Install</a><a href="#air">Air</a><a href="#space">Space</a><a href="#kiosk">Kiosk</a><a href="#pi">Pi</a><a href="#mcp">MCP</a><a href="#data">Data</a>
     <a href="https://github.com/jdoscher/wxterm">GitHub</a>
   </nav>
 </div></div>
@@ -155,8 +155,10 @@
         a line-drawn map, conditions, a 48-hour graph, tides, the moon and the forecast, in ASCII, box-drawing and
         braille.
         It runs on an old laptop as a kiosk with no desktop, or in any big terminal window.</p>
-      <p class="newline">New in 1.2: <a href="#air">live air traffic on the map</a>, contributed by Justin Van Bibber.
-        Still in early testing from 1.1: <a href="#pi">Raspberry Pi 4 and 5 support</a>.</p>
+      <p class="newline">New in 1.3: <a href="#space">spacecraft over the map</a>: the space stations, the brightest
+        satellites and Starlink, with their passes. And laptops can sleep with the lid shut.
+        From 1.2: <a href="#air">live air traffic</a>, contributed by Justin Van Bibber.
+        Still in early testing: <a href="#pi">Raspberry Pi 4 and 5 support</a>.</p>
     </div>
     <div class="hero-actions">
       <a class="btn" href="https://github.com/jdoscher/wxterm">GitHub&nbsp;→</a>
@@ -189,6 +191,7 @@
           <dt>48 hours</dt><dd>Temperature and dew point as braille line plots over rain-chance bars.</dd>
           <dt>Tide · moon</dt><dd>The tide curve through tomorrow with every high and low, plus the moon phase, rise and set.</dd>
           <dt>5-day</dt><dd>Highs, lows, rain chance and a few words for each day.</dd>
+          <dt>Spacecraft</dt><dd>The ISS, Tiangong, the brightest satellites and Starlink crossing the map with their ground tracks, a countdown to the next station overhead, and the passes you can see from home.</dd>
           <dt>Air traffic</dt><dd>One key puts live flights on the map: aircraft as arrows with trails and data tags, runways, and the radar loop still running underneath. Contributed by Justin Van Bibber.</dd>
           <dt>Rotating</dt><dd>A panel that cycles between the forecaster's discussion, typed out like a teletype, the surf, and temperatures from the coast inland.</dd>
         </dl>
@@ -197,7 +200,7 @@
         <h2>Small touches</h2>
         <dl class="spec">
           <dt><kbd>l</kbd></dt><dd>Next location. Ten are built in: yours plus nine demo cities from San Francisco to Tokyo.</dd>
-          <dt><kbd>w</kbd> <kbd>a</kbd></dt><dd>Radar and air traffic, each on or off. <kbd>+</kbd> <kbd>-</kbd> change the range, <kbd>Tab</kbd> picks a flight, <kbd>t</kbd> cycles the data tags.</dd>
+          <dt><kbd>w</kbd> <kbd>a</kbd> <kbd>o</kbd></dt><dd>Radar, air traffic and spacecraft, each on or off. <kbd>+</kbd> <kbd>-</kbd> change the range, <kbd>Tab</kbd> picks a flight, <kbd>t</kbd> cycles the data tags.</dd>
           <dt><kbd>g</kbd></dt><dd>Record exactly one radar loop as a GIF. Every GIF on this page was made that way.</dd>
           <dt><kbd>f</kbd></dt><dd>Big digits as segments, braille dots or blocks.</dd>
           <dt><kbd>s</kbd></dt><dd>Shuffle the layout. It also happens every 15 minutes, so nothing burns in.</dd>
@@ -247,6 +250,25 @@
       AsciiFlights onto wxterm's map. Thanks, Justin. Aircraft come from the free
       <a href="https://github.com/adsbfi/opendata">adsb.fi</a> feed and are fetched only while air traffic is on.
       It's off by default; <code>AIR=on</code> in <code>kiosk.conf</code> turns it on at first start.</p>
+  </section>
+
+  <section id="space">
+    <h2>Spacecraft</h2>
+    <p>Press <kbd>o</kbd> and the map shows what's overhead in orbit: ◆ the space stations and
+      ◇ everything else, each with its name, altitude and a dotted ground track a minute and a
+      half behind and ahead. A satellite crosses a 100 NM map in about a minute, so they come and go all day. When no
+      station is over the map, the top border counts down to the next one, and a page of the rotating panel lists the
+      stations' passes you can actually see from home: in sunlight, in a dark sky, at least 10° up.</p>
+    <div class="gallery">
+      <figure><img loading="lazy" src="gifs/wxterm-chicago-amber-iss.gif" width="1920" height="1080" alt="wxterm in amber at 100 nautical miles over Chicago: the ISS, marked with a diamond, its name and altitude, crosses the map on a dotted ground track while the top border reads ISS over the map"><figcaption>Chicago · amber · the ISS at 417 km</figcaption></figure>
+      <figure><img loading="lazy" src="gifs/wxterm-nyc-white-starlink.gif" width="1920" height="1080" alt="wxterm in white at 100 nautical miles over New York: a dozen Starlink satellites, each a small diamond with its number and altitude, sweep across the map around the city's town names"><figcaption>New York · white · Starlink</figcaption></figure>
+      <figure><img loading="lazy" src="gifs/wxterm-seattle-color-iss.gif" width="1920" height="1080" alt="wxterm in colour at 100 nautical miles over Seattle: the ISS crosses Puget Sound from the southwest on a dotted ground track at 419 km, with Starlink satellites passing around it"><figcaption>Seattle · colour · the ISS and Starlink</figcaption></figure>
+      <figure><img loading="lazy" src="gifs/wxterm-tokyo-green-tiangong.gif" width="1920" height="1080" alt="wxterm in green at 100 nautical miles over Tokyo: China's Tiangong space station crosses south of the city at 389 km, and the rotating panel lists its visible passes"><figcaption>Tokyo · green · Tiangong and its passes</figcaption></figure>
+    </div>
+    <p>Each GIF is one real pass recorded on the kiosk and played back at three times the speed. Orbits come from
+      <a href="https://celestrak.org">CelesTrak</a> a few times a day, and positions are worked out on the machine with
+      SGP4, so the layer makes no other network requests. It's on by default; <code>SPACE=off</code> in
+      <code>kiosk.conf</code> turns it off.</p>
   </section>
 
   <section id="kiosk">
@@ -362,7 +384,7 @@
 </main>
 
 <footer><div class="wrap">
-  <span>wxterm 1.2 · MIT license · by Jay Doscher · air traffic by <a href="https://github.com/notjvb">Justin Van Bibber</a></span>
+  <span>wxterm 1.3 · MIT license · by Jay Doscher · air traffic by <a href="https://github.com/notjvb">Justin Van Bibber</a></span>
   <a href="https://github.com/jdoscher/wxterm">Source on GitHub</a>
   <a href="https://github.com/jdoscher/wxterm/issues">Issues</a>
   <span>Weather data © NWS, NOAA, Open-Meteo (CC BY 4.0), RainViewer, aviationweather.gov</span>

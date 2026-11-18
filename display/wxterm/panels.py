@@ -426,13 +426,16 @@ class DaysPanel(Panel):
 # --- rotating extras: discussion teletype / surf / coast-to-desert ---------------------
 
 class ExtrasPanel(Panel):
-    SLOTS = (("afd", 75), ("surf", 30), ("transect", 30))
+    SLOTS = (("afd", 75), ("surf", 30), ("transect", 30), ("passes", 30))
 
     @classmethod
     def available(cls, app) -> list[tuple[str, int]]:
         srcs = ((getattr(app, "data", None) or {}).get("sources") or {})
         skip = {k for k in ("afd", "marine") if ((srcs.get(k) or {}).get("data") or {}).get("unsupported")}
-        return [s for s in cls.SLOTS if not (s[0] == "afd" and "afd" in skip or s[0] == "surf" and "marine" in skip)]
+        if not getattr(app, "space_on", False) or getattr(app, "space_passes", None) is None:
+            skip.add("passes")
+        return [s for s in cls.SLOTS if not (s[0] == "afd" and "afd" in skip or s[0] == "surf" and "marine" in skip
+                                             or s[0] in skip)]
 
     def current(self) -> tuple[str, float, int, int]:
         app = self.app
@@ -469,6 +472,34 @@ class ExtrasPanel(Panel):
             self.typing = True
             if int(time.time() * 2) % 2 == 0:
                 c.put(3 + len(lines[-1]), len(lines), "█", t.bright)
+
+    def _passes(self, c, t, w, h, el, dots):
+        """When the space stations can be seen from here: sunlit, in a dark sky, at least 10° up."""
+        app = self.app
+        passes = getattr(app, "space_passes", None) or []
+        place = "HOME" if getattr(app, "loc", "") == "home" else self.label("name", "HERE")
+        c.box(0, 0, w, h, t.dim, f"SPACE STATIONS · VISIBLE FROM {place}", t.bright, right=dots)
+        vis = [p for p in passes if p.visible]
+        c.put(3, 1, "WHEN          STATION     PEAK  FROM → TO    LENGTH", t.dim)
+        y = 2
+        for p in vis[: h - 5]:
+            d = datetime.fromtimestamp(p.rise, TZ)
+            mins = max(1, round((p.set - p.rise) / 60))
+            c.put(3, y, f"{d:%a} {hm(d):>6}    {p.name:<10} {p.max_el:>3.0f}°   {p.rise_dir:>2} → {p.set_dir:<2}"
+                        f"     {mins} MIN".upper(), t.bright if p.max_el >= 40 else t.fg)
+            y += 1
+        if not vis:
+            c.put(3, y, "NO VISIBLE PASSES IN THE NEXT TWO DAYS", t.dim)
+            y += 1
+            if passes:
+                p = passes[0]
+                d = datetime.fromtimestamp(p.rise, TZ)
+                c.put(3, y, f"NEXT PASS (IN DAYLIGHT OR SHADOW): {p.name} {d:%a} {hm(d)}, {p.max_el:.0f}° UP".upper(),
+                      t.dim)
+        nxt = getattr(app, "space_next", None)
+        if nxt and h > 6:
+            d = datetime.fromtimestamp(nxt[1], TZ)
+            c.put(3, h - 2, f"NEXT OVER THE MAP: {nxt[0]} {d:%a} {hm(d)}".upper(), t.dim)
 
     def _surf(self, c, t, w, h, el, dots):
         m = self.src("marine") or {}

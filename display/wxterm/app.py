@@ -1,7 +1,7 @@
 """wxterm: full-screen terminal weather display. Talks to one wxterm collector per location (see api.locations()).
 
-The big map (MapPanel, flights.py) has two layers, each switched on and off on its own: the radar loop (`w`) and
-live air traffic (`a`)."""
+The big map (MapPanel, flights.py) has three layers, each switched on and off on its own: the radar loop (`w`), live
+air traffic (`a`) and spacecraft overhead (`o`, space.py)."""
 from __future__ import annotations
 
 import json
@@ -14,7 +14,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 
-from . import api, gif, glyphs, remote
+from . import api, gif, glyphs, remote, space
 from .flights import DEFAULT_RANGE, RANGES, TAG_MODES, MapPanel, Traffic
 from .panels import set_tz, DaysPanel, ExtrasPanel, GraphPanel, NowPanel, StatusBar, TidePanel
 from .themes import THEMES, by_name
@@ -44,7 +44,7 @@ class WxApp(App):
                 ("r", "refresh", "Refresh"), ("q", "quit", "Quit"), ("g", "gif", "Save GIF"),
                 ("f", "cycle_font", "Big font"), ("s", "shuffle", "Shuffle layout"),
                 # map layers and range
-                ("a", "toggle_air", "Air traffic"), ("w", "toggle_radar", "Radar"),
+                ("a", "toggle_air", "Air traffic"), ("w", "toggle_radar", "Radar"), ("o", "toggle_space", "Spacecraft"),
                 ("plus,equals_sign", "zoom(-1)", "Zoom in"), ("minus,underscore", "zoom(1)", "Zoom out"),
                 # air traffic only; these do nothing while it's off
                 ("t", "air_tags", "Data tags"),
@@ -88,6 +88,8 @@ class WxApp(App):
         self.extras_since = time.time()
         self._radar_want: tuple | None = None
         self._started = time.time()
+        self._last_tick = time.time()      # wall clock at the last 1 s tick, to notice a suspend
+        self.resumed_at = 0.0              # when the machine last woke up (0 = not since start)
         # map layers: saved choices win; WXTERM_AIR (kiosk.conf AIR) is the first-run default for air traffic,
         # which is off unless asked for because it polls the ADS-B feeds every few seconds
         air = st.get("air")
@@ -97,6 +99,14 @@ class WxApp(App):
         self.air_tags = st.get("air_tags") if st.get("air_tags") in TAG_MODES else "AUTO"
         self.traffic = Traffic()
         self._air_busy = self._routes_busy = False
+        # spacecraft: on unless turned off; the orbits are computed here, so it costs no network while it runs
+        sp = st.get("space")
+        self.space_on = sp if isinstance(sp, bool) else os.environ.get("WXTERM_SPACE", "on").lower() in ON
+        self.sky = space.Sky()
+        self.space_next: tuple[str, float] | None = None   # next crewed station over the map: (name, unix time)
+        self.space_passes: list[space.Pass] | None = None  # passes over the location (None = not worked out yet)
+        self._space_for: tuple | None = None               # (location, bbox) the two above were worked out for
+        self._space_busy = False
 
     @property
     def pal(self):
@@ -139,6 +149,10 @@ class WxApp(App):
         self.set_interval(2.5, self._air_poll)
         self.set_interval(2, self._air_routes)
         self.set_interval(0.5, self._air_tick)
+        self.set_interval(30, self._space_scan)
+        self.set_interval(600, self._space_slow)
+        self.set_interval(3 * 3600, self._space_fetch)
+        self.call_after_refresh(self._space_fetch)
         if self.SHUFFLE_MIN > 0:
             self.set_interval(self.SHUFFLE_MIN * 60, self.action_shuffle)
 
@@ -162,6 +176,7 @@ class WxApp(App):
             tmp = STATE.with_suffix(".tmp")
             tmp.write_text(json.dumps({"theme": self.pal.name, "location": self.loc, "bigfont": self.bigfont,
                                        "gif": self._gif_token, "air": self.air_on, "radar": self.radar_on,
+                                       "space": self.space_on,
                                        "air_range": self.air_range, "air_tags": self.air_tags}))
             tmp.replace(STATE)
             self._state_mtime = self._mtime()
@@ -178,7 +193,11 @@ class WxApp(App):
             "cells": [self.size.width, self.size.height],
             "location": self.loc, "theme": self.pal.name, "bigfont": self.bigfont,
             "radar_paused": self.radar_paused, "radar_frames": len(frames), "recording_gif": self._recording,
-            "layers": {"radar": self.radar_on, "air": self.air_on}, "range_nm": self.air_range,
+            "layers": {"radar": self.radar_on, "air": self.air_on, "space": self.space_on},
+            "range_nm": self.air_range,
+            "space": {"objects": len(self.sky), "near_map": len(self.sky.cand),
+                      "next_station_over_map": ({"name": self.space_next[0], "at": round(self.space_next[1])}
+                                                if self.space_next else None)} if self.space_on else None,
             "air": {"tags": self.air_tags, "aircraft": len(tr.planes), "feed": tr.source or None,
                     "feed_error": tr.error or None,
                     "feed_age_s": round(time.time() - tr.ok_at) if tr.ok_at else None,
@@ -212,6 +231,8 @@ class WxApp(App):
             self._set_air_layer(st["air"], save=False)
         if isinstance(st.get("radar"), bool) and st["radar"] != self.radar_on:
             self._set_radar_layer(st["radar"], save=False)
+        if isinstance(st.get("space"), bool) and st["space"] != self.space_on:
+            self._set_space_layer(st["space"], save=False)
         if st.get("air_range") in RANGES and st["air_range"] != self.air_range:
             self._set_range(st["air_range"], save=False)   # saving here would write back the other old values
         if st.get("air_tags") in TAG_MODES and st["air_tags"] != self.air_tags:
@@ -321,6 +342,7 @@ class WxApp(App):
         self.api_error = None
         self.radar_idx = 0
         self.traffic.reset()
+        self.sky.cand, self.space_next, self.space_passes, self._space_for = [], None, None, None
         if save:
             self._save_state()
         self.refresh_all()
@@ -355,6 +377,18 @@ class WxApp(App):
         self.call_after_refresh(self.request_radar)
         self.refresh_all()
 
+    def action_toggle_space(self):
+        self._set_space_layer(not self.space_on)
+
+    def _set_space_layer(self, on: bool, save: bool = True):
+        self.space_on = on
+        if save:
+            self._save_state()
+        if on:
+            self._space_scan()
+            self._space_slow()
+        self.refresh_all()
+
     def action_toggle_radar(self):
         self._set_radar_layer(not self.radar_on)
 
@@ -381,6 +415,9 @@ class WxApp(App):
             self._save_state()
         self._air_poll()
         self.request_radar()
+        self.sky.cand = []
+        self._space_scan()
+        self._space_slow()
         self._refresh_map()
 
     def action_air_tags(self):
@@ -405,7 +442,7 @@ class WxApp(App):
     def check_action(self, action: str, parameters) -> bool | None:
         """Map keys stay out of dialogs, and air traffic keys only act while it's on; otherwise Tab and Escape keep
         their usual jobs."""
-        if action.startswith("air_") or action in ("toggle_air", "toggle_radar", "zoom"):
+        if action.startswith("air_") or action in ("toggle_air", "toggle_radar", "toggle_space", "zoom"):
             if len(self.screen_stack) > 1:
                 return False
             if action.startswith("air_") and not self.air_on:
@@ -422,8 +459,12 @@ class WxApp(App):
         self.traffic.selected = hex_ if hex_ != self.traffic.selected else None
         self._refresh_map()
 
+    def _moving(self) -> bool:
+        """Something on the map moves by itself: aircraft, or a spacecraft on or near it."""
+        return self.air_on or (self.space_on and bool(self.sky.cand))
+
     def _air_tick(self):
-        if self.air_on and not self._radar_running():   # while the loop runs, _radar_tick moves the aircraft too
+        if self._moving() and not self._radar_running():   # while the loop runs, _radar_tick moves things too
             self._refresh_map()
 
     def _air_poll(self):
@@ -455,7 +496,7 @@ class WxApp(App):
             return
         if j is not None:
             self.traffic.ingest(j, time.time())
-        else:
+        elif not self.waking():
             self.traffic.error = err
         self._refresh_map()
 
@@ -513,6 +554,8 @@ class WxApp(App):
         if d is not None:
             set_tz((d.get("home") or {}).get("tz"))
             self.data = d
+        if err and self.waking():
+            return   # Wi-Fi is still reconnecting after a suspend; the retries above will get through
         self.api_error = err
         self.refresh_all()
 
@@ -528,6 +571,8 @@ class WxApp(App):
         if base == self.base:
             self.geo = g
             self.request_radar()   # the radar box is centred on home, which comes with the map
+            self.call_after_refresh(self._space_scan)
+            self.call_after_refresh(self._space_slow)
 
     def request_radar(self):
         """The radar loop, sampled by the collector to the map's box at the current range."""
@@ -560,8 +605,118 @@ class WxApp(App):
             self.radar_idx = 0
         self._refresh_map()
 
+    # --- spacecraft (space.py) ---
+    def _map_box(self):
+        """(panel, bbox) of the map as it's laid out now, or (None, None) before the map and home are known."""
+        panels = self.query(MapPanel)
+        if not panels or not self.geo:
+            return None, None
+        panel = panels.first(MapPanel)
+        if panel.size.width < 10:
+            return None, None
+        return panel, panel.bbox(self.geo["home"])
+
+    def _space_fetch(self):
+        """Orbital elements, a few times a day, always from the first location's collector (one download per group
+        for the whole house; CelesTrak refuses repeats)."""
+        bases = [self.locs[0][1]] + ([self.base] if self.base != self.locs[0][1] else [])
+
+        def work():
+            for g in space.GROUPS:
+                for base in bases:
+                    try:
+                        j = api.get(base, f"/api/tle?group={g}", timeout=120)
+                    except Exception:  # noqa: BLE001 - try the next collector, then wait for the next round
+                        continue
+                    if j.get("records") and j.get("fetched") != self.sky.loaded.get(g):
+                        self.sky.load(g, j["records"], j["fetched"])
+                        self.call_from_thread(self._space_scan)
+                        self.call_from_thread(self._space_slow, True)
+                    break
+            # a group the collector hadn't fetched yet (CelesTrak spaces out the first downloads): ask again in
+            # 10 minutes rather than at the next 3-hourly round
+            if any(g not in self.sky.loaded for g in space.GROUPS):
+                self.call_from_thread(self.set_timer, 600, self._space_fetch)
+
+        self.run_worker(work, thread=True, group="tle", exclusive=True)
+
+    def _space_scan(self):
+        """Every 30 s: which spacecraft could be on the map in the next minute (the only ones drawn each frame)."""
+        if not self.space_on or not len(self.sky) or self._space_busy:
+            return
+        _, bbox = self._map_box()
+        if bbox is None:
+            return
+        self._space_busy = True
+        want = (self.base, bbox)
+
+        def work():
+            try:
+                cand = self.sky.candidates(bbox, time.time())
+            finally:
+                self._space_busy = False
+            self.call_from_thread(self._set_space_cand, want, cand)
+
+        self.run_worker(work, thread=True, group="space")
+
+    def _set_space_cand(self, want, cand):
+        if want == (self.base, self._map_box()[1]):
+            self.sky.cand = cand
+            self._refresh_map()
+
+    def _space_slow(self, force: bool = False):
+        """Every 10 minutes: the next crewed station over the map, and passes over the location for the panel."""
+        if not self.space_on or not self.sky.stations:
+            return
+        _, bbox = self._map_box()
+        if bbox is None:
+            return
+        want = (self.base, bbox)
+        home = tuple(self.geo["home"])
+
+        def work():
+            now = time.time()
+            nxt = self.sky.next_over_map(bbox, now, horizon=4 * 86400)
+            passes = self.sky.passes(home, now)
+            self.call_from_thread(self._set_space_slow, want, nxt, passes)
+
+        self.run_worker(work, thread=True, group="space-slow", exclusive=True)
+
+    def _set_space_slow(self, want, nxt, passes):
+        if want[0] != self.base:
+            return
+        self.space_next, self._space_for = nxt, want
+        if want[1] == self._map_box()[1] or self.space_passes is None:
+            self.space_passes = passes
+        self._refresh_map()
+
+    # --- suspend and resume ---
+    WAKE_GRACE = 60   # seconds after waking during which network errors are expected (Wi-Fi reconnecting)
+
+    def _resumed(self, slept: float):
+        """Back from a suspend: everything on screen is old. Drop the aircraft (they are dead-reckoned from their
+        last fix, so after an hour they would be drawn far off course) and the old radar loop, then refresh."""
+        self.resumed_at = time.time()
+        self.traffic.reset()
+        self.radar = None
+        self.radar_idx = self.radar_hold = 0
+        self.flash(f"AWAKE AFTER {fmt_span(slept)} · REFRESHING", 20)
+        base = self.base
+        self.run_worker(lambda: api.get(base, "/api/refresh", timeout=5), thread=True, group="wake")
+        self.action_refresh()
+        for delay in (10, 25, 45):   # the network may still be coming up: try again a few times
+            self.set_timer(delay, self.action_refresh)
+        self.refresh_all()
+
+    def waking(self) -> bool:
+        return bool(self.resumed_at) and time.time() - self.resumed_at < self.WAKE_GRACE
+
     # --- timers ---
     def _tick(self):
+        now = time.time()
+        if now - self._last_tick > 30:     # the machine slept (timers stop while it's suspended)
+            self._resumed(now - self._last_tick)
+        self._last_tick = now
         if self.gif_msg and time.time() > self._gif_msg_until:
             self.gif_msg = ""
         sel = "#now, #status" + (", #graph, #tide" if int(time.time()) % 60 == 0 else "")
@@ -579,7 +734,7 @@ class WxApp(App):
         frames = self.radar["frames"]
         if self.radar_idx >= len(frames) - 1:
             self.radar_hold += 1
-            if self.radar_hold < 8 and not self.air_on:  # linger on the latest frame
+            if self.radar_hold < 8 and not self._moving():  # linger on the latest frame
                 return
             if self.radar_hold >= 8:
                 self.radar_hold, self.radar_idx = 0, 0
@@ -599,6 +754,11 @@ class WxApp(App):
             panel.typing = True  # draw the new slot now
         if panel.typing:  # static slots (surf, transect, a finished discussion) only redraw when data changes
             panel.refresh()
+
+
+def fmt_span(secs: float) -> str:
+    m = int(secs // 60)
+    return f"{m // 60}H {m % 60:02d}M" if m >= 60 else f"{max(m, 1)} MIN"
 
 
 def main():

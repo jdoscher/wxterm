@@ -5,6 +5,7 @@ GET /api/radar?w=&h=    radar level grids for a w x h dot map (optional &bbox=lo
 GET /api/geo            coastline/border/roads/lakes polylines, airports and runways, town labels, home point
 GET /api/aircraft?dist= aircraft within dist NM of home (ADS-B, fetched on demand, cached 1.5 s)
 GET /api/routes?cs=     origin/destination for up to 8 comma-separated airline callsigns
+GET /api/tle?group=     CelesTrak orbital elements (stations, visual, starlink), cached for 6 hours
 GET /healthz
 """
 from __future__ import annotations
@@ -21,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import config, flights, sources, world
+from . import config, flights, sources, space, world
 from .radar import Radar, bbox_for
 
 log = logging.getLogger("wxcollect")
@@ -174,6 +175,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(flights.aircraft(int(float(q.get("dist", 40)))))
                 except RuntimeError as e:  # both feeds failed: the display shows this and keeps its last picture
                     return self._send({"error": str(e)}, 502)
+            if u.path == "/api/tle":
+                try:
+                    return self._send(space.elements(q.get("group", "")))
+                except ValueError as e:
+                    return self._send({"error": str(e)}, 400)
+                except LookupError as e:
+                    return self._send({"error": str(e)}, 502)
             if u.path == "/api/routes":
                 return self._send(flights.routes(q.get("cs", "").split(",")))
             if u.path == "/api/geo":
@@ -185,11 +193,29 @@ class Handler(BaseHTTPRequestHandler):
             self._send({"error": repr(e)}, 500)
 
 
+def watch_suspend(check: float = 15, settle: float = 20):
+    """Wake every job after the machine sleeps. Job waits run on the monotonic clock, which stops while the machine
+    is suspended, so without this a 6-hour job would carry on waiting after the lid opens. A suspend shows up as the
+    wall clock moving further than the monotonic one; wait `settle` seconds for Wi-Fi, then refresh everything."""
+    wall, mono = time.time(), time.monotonic()
+    while True:
+        time.sleep(check)
+        w, m = time.time(), time.monotonic()
+        slept = (w - wall) - (m - mono)
+        wall, mono = w, m
+        if slept > 60:
+            log.info("woke after about %.0f s asleep; refreshing everything in %.0f s", slept, settle)
+            time.sleep(settle)
+            for ev in WAKE.values():
+                ev.set()
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     load()
     for name in JOBS:
         threading.Thread(target=run_job, args=(name,), daemon=True, name=name).start()
+    threading.Thread(target=watch_suspend, daemon=True, name="suspend").start()
     srv = ThreadingHTTPServer(("0.0.0.0", config.PORT), Handler)
     log.info("listening on :%d (home %.4f,%.4f)", config.PORT, config.LAT, config.LON)
     srv.serve_forever()

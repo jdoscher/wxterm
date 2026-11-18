@@ -27,11 +27,13 @@ collectors (Docker, one per location, localhost:8091+)  ── JSON ──>  dis
 ```
 
 ## Features
-- **One map, two layers.** The map (coast, borders, highways, towns, runways and airport codes) is centred on home
-  with range rings, from 5 to 100 NM. The **radar loop** (`w`) and live **air traffic** (`a`) each switch on and off
-  on their own: rain only, planes flying through the rain, or the bare map.
+- **One map, three layers.** The map (coast, borders, highways, towns, runways and airport codes) is centred on home
+  with range rings, from 5 to 100 NM. The **radar loop** (`w`), live **air traffic** (`a`) and **spacecraft** (`o`)
+  each switch on and off on their own.
 - **Air traffic** (contributed by [Justin Van Bibber](https://github.com/notjvb)): live ADS-B aircraft as arrows with
   trails and data tags, a traffic list and the selected flight's details
+- **Spacecraft:** the space stations, the brightest satellites and Starlink as they cross the map, with ground
+  tracks, a countdown to the next station overhead, and the stations' visible passes
 - **Now:** temperature in seven-segment digits, conditions, wind, pressure trend, alerts (US)
 - **48 hours:** temperature and dew point lines with rain-chance bars
 - **Tides and moon:** tide curve with highs and lows, plus moon phase, rise and set, and the next full and new moon
@@ -63,6 +65,7 @@ Use a terminal of at least 160x45. It's designed for 240x62, which is 1920x1080 
 | `f` | big-digit style: segment, dots (braille LED), blocks |
 | `w` | radar loop on/off |
 | `a` | air traffic on/off |
+| `o` | spacecraft on/off |
 | `+` `-` | range: 5, 10, 15, 25, 40, 60 or 100 NM from home to the nearest edge (40 to start) |
 | `g` | save a GIF of one radar loop (10 s with the radar off) to `~/gifs` |
 | `s` | shuffle the layout now |
@@ -102,6 +105,7 @@ change `kiosk.conf`. Every setting:
 | `THEME` | `amber` | first-run theme; `c` changes it and the choice is saved |
 | `BIGFONT` | `segment` | first-run digit style; `f` changes it |
 | `AIR` | `off` | first-run air traffic: `on` or `off` (it polls the ADS-B feeds every 2.5 s while on); `a` changes it |
+| `LID` | `ignore` | laptop lid in kiosk mode: `ignore`, or `suspend` to sleep when it closes and wake when it opens (on battery or power; a dock keeps it awake). The display refreshes everything on waking |
 | `SHUFFLE_MIN` | `15` | burn-in shuffle interval in minutes, `0` = off |
 | `GIF_FPS` | `10` | GIF frame rate |
 | `FONT`, `FONT_SIZE` | `DejaVu Sans Mono`, `13` | terminal font (13 px gives 240x62 cells at 1080p) |
@@ -116,8 +120,8 @@ change `kiosk.conf`. Every setting:
 Day to day:
 - `sudo kiosk/mode.sh desktop` (or `kiosk`) switches between the normal desktop and the kiosk, effective at the next
   boot (add `--now` to reboot right away). `mode.sh status` shows the current mode. Ctrl+Alt+F2 opens a console.
-- `scripts/wxctl.sh location sf | theme green | font dots | air on | radar off | range 25 | tags all | gif` controls
-  the running display from SSH.
+- `scripts/wxctl.sh location sf | theme green | font dots | air on | radar off | space on | range 25 | tags all |
+  gif` controls the running display from SSH.
 - `kiosk/capture.sh shot` saves a full-screen PNG and `capture.sh video 30` records 30 s of MP4, both to
   `STATE_DIR/captures`.
 - `scripts/deploy.sh HOST --up`, run from a development checkout, pushes code to the kiosk, rebuilds and restarts
@@ -194,6 +198,24 @@ come from OurAirports; `new-location.py` adds them to new locations. To add them
 feature, run `python3 scripts/make_geo.py --add-airports locations/home.geo.json` and restart its collector. Without
 them the map still works, just without runways.
 
+## Spacecraft
+The space stations, the ~150 brightest satellites and Starlink, drawn as they cross the map (`o` turns the layer on
+and off; it's on unless `SPACE=off`).
+
+- **On the map:** ◆ for a crewed station (ISS, Tiangong), ◇ for anything else, with the name and altitude and a dotted
+  ground track 90 seconds behind and ahead. At orbital speed a satellite crosses a 40 NM map in about 20 seconds, so
+  they come and go. Modules and ships docked to a station fold into it.
+- **In the top border:** the countdown to the next station over the map (`ISS IN 2D 8H`; at 40 NM that's every day
+  or three), or `ISS OVER THE MAP` while it's there.
+- **In the rotating panel:** the stations' passes you can actually see from the location in the next two days: in
+  sunlight, in a dark sky, at least 10° up, with the time, peak height, direction and length.
+
+Orbits come from [CelesTrak](https://celestrak.org) as general perturbations elements, and positions are worked out
+on the machine with SGP4, checked against [Skyfield](https://rhodesmill.org/skyfield/) in the tests. CelesTrak
+updates each group every couple of hours and refuses repeat downloads before then, so the first location's collector
+fetches each group at most every 6 hours and keeps it on disk, and the display asks only that collector. The layer
+makes no other network requests.
+
 ## MCP server (let an LLM read it)
 With `MCP=yes` in `kiosk.conf`, setup runs a small read-only [MCP](https://modelcontextprotocol.io) server in Docker
 at `http://KIOSK:8090/mcp`. Ask your assistant "is rain heading my way?", "when's the next high tide?" or "is the
@@ -268,6 +290,7 @@ skipped. Every `.env` key is documented in `collector/wxcollect/config.py`.
 | Airports and runways | [OurAirports](https://ourairports.com/data/) (public domain) | static |
 | Aircraft (air traffic) | [adsb.fi open data](https://github.com/adsbfi/opendata), [adsb.lol](https://api.adsb.lol) as a fallback | 2.5 s, only while air traffic is on |
 | Flight routes | [adsbdb](https://www.adsbdb.com) | on demand, cached 6 h |
+| Spacecraft orbits | [CelesTrak](https://celestrak.org/NORAD/elements/) (stations, visual, Starlink), propagated locally with [sgp4](https://pypi.org/project/sgp4/) | 6 h, one collector |
 | Town names (`new-location.py`) | [GeoNames](https://www.geonames.org) cities over 5,000 people (CC BY 4.0) | static |
 
 adsb.fi's open data is free for personal, non-commercial use. RainViewer's free API serves zoom 7 at most and only
@@ -282,7 +305,7 @@ data is CC BY 4.0.
 - `python -m wxterm.snap OUTDIR 240 67 [themes...]` (with `WXTERM_LOCATION=sf`) renders the screen headless to SVG
   and fails if any panel shows an error. `WXTERM_AIR=on` adds air traffic to the map.
 - Collector API, per location (localhost only): `GET /api/all`, `/api/radar?w=&h=` (optional `&bbox=` and `&last=N`
-  frames), `/api/geo`, `/api/aircraft?dist=NM`, `/api/routes?cs=UAL1,DAL2`, `/api/refresh`, `/healthz`.
+  frames), `/api/geo`, `/api/aircraft?dist=NM`, `/api/routes?cs=UAL1,DAL2`, `/api/tle?group=stations`, `/api/refresh`, `/healthz`.
 - MCP server: `mcp/wxmcp/` (`weather.py` turns collector JSON into summaries, `system.py` reads machine stats,
   `server.py` holds the tools and the auth guard). The display's side is `display/wxterm/remote.py`.
 - Layout: `display/wxterm/app.py`. Panels: `panels.py`, and the map with its radar and air traffic layers in

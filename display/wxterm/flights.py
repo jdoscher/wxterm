@@ -21,6 +21,7 @@ from datetime import datetime
 from .canvas import BAYER, Canvas
 from . import panels
 from .panels import DENS, Panel, hm
+from .space import fmt_until
 
 RANGES = (5, 10, 15, 25, 40, 60, 100)   # NM from home to the nearest map edge; map lines reach about 100 NM
 DEFAULT_RANGE = 40                      # about the area the radar-only map used to show
@@ -385,7 +386,7 @@ class MapPanel(Panel):
         """With air traffic off the picture only changes with the radar frame, so each frame's strips are kept."""
         app = self.app
         r = self._radar()
-        if getattr(app, "air_on", False) or r is None:
+        if getattr(app, "air_on", False) or r is None or self._space_near():
             return super().build_strips()
         frames = r["frames"]
         idx = min(getattr(app, "radar_idx", 0), len(frames) - 1)
@@ -398,6 +399,10 @@ class MapPanel(Panel):
         if hit is None or len(hit) != self.size.height:
             hit = self._still[key] = super().build_strips()
         return hit
+
+    def _space_near(self) -> bool:
+        app = self.app
+        return bool(getattr(app, "space_on", False) and getattr(getattr(app, "sky", None), "cand", None))
 
     # --- drawing ---
     def draw(self, c, t, w, h):
@@ -426,6 +431,9 @@ class MapPanel(Panel):
             layers.append(f"RADAR · {((getattr(app, 'radar', None) or {}).get('source') or '--').upper()}")
         if air_on:
             layers.append(f"AIR TRAFFIC · {tr.source or 'ADS-B'}")
+        space_on = getattr(app, "space_on", False)
+        if space_on:
+            layers.append("SPACE")
         title = "  ".join(layers) or "MAP"
         c.box(0, 0, w, h, t.dim, title, t.bright)
         sep = 1 + mw
@@ -434,20 +442,19 @@ class MapPanel(Panel):
             stats.append(f"{airborne} AIRBORNE · {len(planes) - airborne} GROUND")
         if air_on and mode == "AUTO" and not tr.tags_full and any(not p.ground for p in planes):
             stats.append("TAGS BUSY")   # too many aircraft for a tag each at this range: Tab steps through them
+        if space_on:
+            stats.append("")   # filled in once the spacecraft on the map are known (below)
         if fr:   # the timeline in the bottom border shows the frame too, so this goes first when space is short
             state = "PAUSED" if getattr(app, "radar_paused", False) else "LOOP"
             stats.append(f"{hm(datetime.fromtimestamp(fr['t'], panels.TZ))} {idx + 1}/{len(frames)} {state}")
-        while stats and len(" · ".join(stats)) + len(title) + 10 >= mw:
-            stats.pop()
-        if stats:
-            right = f" {' · '.join(stats)} "
-            c.put(sep - len(right) - 2, 0, right, t.bright)
+        self._stats = (stats, title, sep, mw)   # put in the border after the spacecraft are drawn
         if sw:
             c.put(sep, 0, "┬", t.dim)
             c.put(sep, h - 1, "┴", t.dim)
             for y in range(1, h - 1):
                 c.put(sep, y, "│", t.dim)
-        keys = (f" [A] AIR {'ON' if air_on else 'OFF'}  [W] RADAR {'ON' if wx_on else 'OFF'}  [+/-] {rng} NM "
+        keys = (f" [A] AIR {'ON' if air_on else 'OFF'}  [W] RADAR {'ON' if wx_on else 'OFF'}  "
+                f"[O] SPACE {'ON' if space_on else 'OFF'}  [+/-] {rng} NM "
                 + (f" [T] TAGS {mode}  [TAB] SELECT " if air_on else ""))
         timeline = ""
         if frames:
@@ -459,6 +466,7 @@ class MapPanel(Panel):
         c.put(2, h - 1, keys[: max(0, mw - 2)], t.dim)
         if not home:
             c.put(3, 2, "LOADING MAP…", t.dim)
+            self._border_stats(c, t, "")
             return
 
         lat0, lon0 = home
@@ -484,6 +492,21 @@ class MapPanel(Panel):
                 elif bd[x]:
                     c.dots[1 + y][1 + x], c.dstyle[1 + y][1 + x] = bd[x], bds[x]
 
+        if space_on and app.sky.cand:  # type: ignore[attr-defined]
+            soft = [row[:] for row in soft]   # the base's copy stays clean for the next frame
+        over = self._spacecraft(c, t, mw, mh, P, now, soft) if space_on else []
+        if space_on:
+            stations = [s for s in over if s[0].station]
+            nxt = getattr(app, "space_next", None)
+            if stations:
+                note = f"{stations[0][0].name} OVER THE MAP"
+            elif nxt and nxt[1] > now:
+                note = f"{nxt[0]} IN {fmt_until(nxt[1], now)}"
+            else:
+                note = f"{len(over)} SATELLITE{'S' if len(over) != 1 else ''}" if over else ""
+            self._border_stats(c, t, note)
+        else:
+            self._border_stats(c, t, "")
         if air_on:
             self._traffic(c, t, tr, planes, mw, mh, P, mode, soft, now, lat0, lon0)
         if wx_on:
@@ -498,6 +521,80 @@ class MapPanel(Panel):
             self._side(c, t, tr, sep, w, h, vis, now, home)
         else:
             self.order = [v[0].hex for v in sorted(vis, key=lambda v: (v[0].ground, v[0].d_home))]
+
+    def _border_stats(self, c, t, space_note: str):
+        """Counts in the top border, most important first; the rest drop off when it's too short."""
+        stats, title, sep, mw = self._stats
+        stats = [space_note if s == "" else s for s in stats]
+        stats = [s for s in stats if s]
+        while stats and len(" · ".join(stats)) + len(title) + 10 >= mw:
+            stats.pop()
+        if stats:
+            right = f" {' · '.join(stats)} "
+            c.put(sep - len(right) - 2, 0, right, t.bright)
+
+    def _spacecraft(self, c, t, mw, mh, P, now, soft=None) -> list:
+        """Spacecraft on the map now: a dotted ground track 90 s behind and ahead, a marker (◆ crewed station,
+        ◇ anything else) and the name and altitude. Drawn under the aircraft, whose data tags steer around the label
+        (it's marked in `soft`, like a town name). Returns what's on the map."""
+        app = self.app
+        sky = app.sky  # type: ignore[attr-defined]
+        if not sky.cand:
+            return []
+        lon0, lon1, lat0, lat1 = self.bbox(app.geo["home"])  # type: ignore[attr-defined]
+        try:
+            over = sky.now(sky.cand, now, (lon0, lon1, lat0, lat1))
+        except IndexError:   # the elements were just reloaded; the next scan picks the new indices
+            return []
+        MW, MH = mw * 2, mh * 4
+        for craft, lat, lon, alt, track in over:
+            st = t.accent if craft.station else t.dim
+            n = [0]
+
+            def dot(x, y, s, prio, n=n):   # every other dot: a dotted line
+                n[0] += 1
+                if n[0] % 2 == 0 and 0 <= x < MW and 0 <= y < MH:
+                    c.dot(2 + x, 4 + y, s, prio)
+
+            pts = [P(a, b) for a, b in track]
+            for (x0, y0), (x1, y1), (_, la), (_, lb) in zip(pts, pts[1:], track, track[1:]):
+                if abs(lb - la) < 180:
+                    self._seg(dot, (x0, y0), (x1, y1), st, 3)
+            x, y = P(lat, lon)
+            pc, pr = int(x) // 2, int(y) // 4
+            if not (0 <= pc < mw and 0 <= pr < mh):
+                continue
+            c.put(1 + pc, 1 + pr, "◆" if craft.station else "◇", t.accent if craft.station else t.fg)
+            # the label goes right of the marker, else left, wherever it covers no town name or other label;
+            # failing that, just the name; failing that, a station's label still goes on (the headline), others
+            # keep only their marker
+            lx = None
+            for lab in (f"{craft.name} {alt:,.0f} KM", craft.name):
+                for x0 in (pc + 2, pc - len(lab) - 1):
+                    if 0 <= x0 and x0 + len(lab) <= mw and self._clear(soft, pr, x0 - 1, x0 + len(lab) + 1, mw):
+                        lx = x0
+                        break
+                if lx is not None:
+                    break
+            if lx is None and craft.station:
+                lab = f"{craft.name} {alt:,.0f} KM"
+                lx = pc + 2 if pc + 2 + len(lab) <= mw else pc - len(lab) - 1
+            if lx is not None and lx >= 0:
+                c.put(1 + lx, 1 + pr, lab, t.accent if craft.station else t.fg)
+                if soft is not None:
+                    for i in range(min(lx, pc), max(lx + len(lab), pc + 1)):
+                        soft[pr][i] = 1
+            elif soft is not None:
+                soft[pr][pc] = 1
+        return over
+
+    @staticmethod
+    def _clear(soft, row, a, b, mw) -> bool:
+        """No town name or label in columns a..b-1 of a map row (soft is None in tests: everything's clear)."""
+        if soft is None:
+            return True
+        r = soft[row]
+        return not any(r[i] for i in range(max(a, 0), min(b, mw, len(r))))
 
     @staticmethod
     def _legend(c, t, mw, mh, fr, any_rain):

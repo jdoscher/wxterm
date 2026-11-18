@@ -37,6 +37,12 @@ BIGFONT=segment
 # First-run air traffic on the map: off or on (polls the free ADS-B feeds every 2.5 s while on); key a switches it
 # and the choice is saved. The radar loop is on by default; key w switches it.
 AIR=off
+# Laptop lid in kiosk mode: ignore (the display stays on with the lid shut) or suspend (sleep when the lid closes,
+# on battery or on power, and wake when it opens; a dock or external screen keeps it awake). Applied by setup.sh.
+LID=ignore
+# First-run spacecraft layer: on or off. Orbits come from CelesTrak a few times a day (one download per group for the
+# whole machine) and positions are worked out locally, so it adds no steady network traffic. Key o switches it.
+SPACE=on
 # Burn-in guard: shuffle the layout every N minutes (0 = off)
 SHUFFLE_MIN=15
 # GIF frame rate for the g key

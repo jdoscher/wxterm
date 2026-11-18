@@ -81,3 +81,63 @@ def test_radar_grid_last(last, n):
     out = r.grid(4, 4, (-123, -122, 37, 38), last=last)
     assert len(out["frames"]) == n
     assert out["frames"][-1]["t"] == 1_800_001_200
+
+
+def test_collector_wakes_every_job_after_a_suspend(monkeypatch):
+    """The wall clock jumps past the monotonic clock while the machine sleeps; every job is woken after that."""
+    from wxcollect import main as M
+    clock = {"wall": 1000.0, "mono": 50.0}
+    sleeps = []
+
+    def fake_sleep(s):
+        sleeps.append(s)
+        if len(sleeps) == 1:                       # first check: slept 2 hours
+            clock["wall"] += 7200 + s
+            clock["mono"] += s
+        elif len(sleeps) > 2:
+            raise StopIteration
+    monkeypatch.setattr(M.time, "time", lambda: clock["wall"])
+    monkeypatch.setattr(M.time, "monotonic", lambda: clock["mono"])
+    monkeypatch.setattr(M.time, "sleep", fake_sleep)
+    for ev in M.WAKE.values():
+        ev.clear()
+    try:
+        M.watch_suspend(check=15, settle=20)
+    except StopIteration:
+        pass
+    assert sleeps[:2] == [15, 20]                  # noticed it, waited for the network
+    assert all(ev.is_set() for ev in M.WAKE.values())
+    for ev in M.WAKE.values():
+        ev.clear()
+
+
+def test_tle_elements_are_cached_and_a_refusal_keeps_the_copy(tmp_path, monkeypatch):
+    import urllib.error
+
+    from wxcollect import space
+    monkeypatch.setattr(space.config, "DATA_DIR", str(tmp_path))
+    space._mem.clear()
+    calls = []
+
+    def ok(url, **kw):
+        calls.append(url)
+        return json.dumps([{"OBJECT_NAME": "ISS (ZARYA)", "NORAD_CAT_ID": 25544, "EXTRA": 1}]).encode()
+
+    def refuse(url, **kw):
+        calls.append(url)
+        raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(space, "get", ok)
+    a = space.elements("stations", now=1000)
+    assert len(calls) == 1 and a["records"] == [{"OBJECT_NAME": "ISS (ZARYA)", "NORAD_CAT_ID": 25544}]
+    space.elements("stations", now=1000 + 3600)                      # an hour later: from the cache
+    assert len(calls) == 1
+    monkeypatch.setattr(space, "get", refuse)
+    b = space.elements("stations", now=1000 + 7 * 3600)              # stale: asks, is refused, keeps the copy
+    assert len(calls) == 2 and b["records"] and b["error"] == "HTTP 403"
+    space.elements("stations", now=1000 + 8 * 3600)                  # refused an hour ago: doesn't ask again yet
+    assert len(calls) == 2
+    space._mem.clear()                                               # survives a restart (on disk)
+    assert space.elements("stations", now=1000 + 8 * 3600)["records"]
+    with pytest.raises(ValueError):
+        space.elements("everything")

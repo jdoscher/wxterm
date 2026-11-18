@@ -42,6 +42,7 @@ class FakeCollector:
 
     def __init__(self):
         self.aircraft_calls: list[int] = []
+        self.tle_calls: list[str] = []
         self.fail_aircraft = False
 
     def __call__(self, base, path, timeout=15):
@@ -71,6 +72,10 @@ class FakeCollector:
                 raise urllib.error.HTTPError(base + path, 502, "Bad Gateway", {}, body)
             return {"source": "ADSB.FI", "now": time.time(), "dist": int(q["dist"]), "home": list(HOME),
                     "ac": [dict(a) for a in AIRCRAFT]}
+        if u.path == "/api/tle":
+            from test_space import ISS
+            self.tle_calls.append(q["group"])
+            return {"group": q["group"], "fetched": 1, "records": [ISS] if q["group"] == "stations" else []}
         if u.path == "/api/routes":
             known = {"UAL123": {"airline": "United Airlines", "iata": "UA123", "origin": SFO, "dest": ORD}}
             return {cs: known.get(cs) for cs in q["cs"].split(",")}
@@ -135,7 +140,7 @@ def test_starts_with_radar_on_air_traffic_off_and_fetches_no_aircraft(env):
         assert env.aircraft_calls == []
         s = text(app)
         assert "RADAR · TEST" in s and "AIR TRAFFIC" not in s and "DBZ 10" in s and "ERROR" not in s
-        assert "[A] AIR OFF  [W] RADAR ON  [+/-] 40 NM" in s and "FLIGHT   TYPE" not in s
+        assert "[A] AIR OFF  [W] RADAR ON  [O] SPACE ON  [+/-] 40 NM" in s and "FLIGHT   TYPE" not in s
     run(scenario)
 
 
@@ -168,7 +173,7 @@ def test_w_turns_the_radar_off_and_on(env):
         assert app.radar_on is False and app.radar is None and saved(env)["radar"] is False
         await pilot.pause(0.4)
         s = text(app)
-        assert " MAP " in s.split("\n")[0]
+        assert "─ SPACE " in s.split("\n")[0] and "RADAR" not in s.split("\n")[0]   # only the space layer is left
         assert "RADAR ·" not in s and "DBZ" not in s and "[W] RADAR OFF" in s
         await pilot.press("w")
         assert app.radar_on and saved(env)["radar"] is True
@@ -176,13 +181,13 @@ def test_w_turns_the_radar_off_and_on(env):
     run(scenario)
 
 
-def test_both_layers_off_leaves_the_bare_map(env):
+def test_all_layers_off_leaves_the_bare_map(env):
     async def scenario(app, pilot):
         await radar_ready(app, pilot)
-        await pilot.press("w")
+        await pilot.press("w", "o")
         await pilot.pause(0.4)
         s = text(app)
-        assert "⌂ TESTVILLE" in s and "OAKLAND" in s and "SFO" in s and "ERROR" not in s
+        assert " MAP " in s.split("\n")[0] and "⌂ TESTVILLE" in s and "OAKLAND" in s and "SFO" in s and "ERROR" not in s
     run(scenario)
 
 
@@ -367,11 +372,108 @@ def test_status_file_reports_the_layers(env):
         await to_air(app, pilot)
         app._write_status()
         st = json.loads((env.state.parent / "display-status.json").read_text())
-        assert st["layers"] == {"radar": True, "air": True} and st["range_nm"] == F.DEFAULT_RANGE
+        assert st["layers"] == {"radar": True, "air": True, "space": True} and st["range_nm"] == F.DEFAULT_RANGE
         assert st["layout"]["map"] in ("left", "right")
         assert st["air"]["aircraft"] == len(AIRCRAFT) and st["air"]["feed"] == "ADSB.FI"
         await pilot.press("a")
         app._write_status()
         st = json.loads((env.state.parent / "display-status.json").read_text())
-        assert st["layers"] == {"radar": True, "air": False} and st["air"] is None
+        assert st["layers"] == {"radar": True, "air": False, "space": True} and st["air"] is None
+    run(scenario)
+
+
+# --- suspend and resume ------------------------------------------------------------------------------------------
+
+def test_waking_from_suspend_drops_old_aircraft_and_radar_and_refreshes(env):
+    async def scenario(app, pilot):
+        await to_air(app, pilot)
+        await radar_ready(app, pilot)
+        env.aircraft_calls.clear()
+        app._last_tick -= 3600                     # as if the 1 s tick last ran an hour ago: the machine slept
+        app._tick()
+        assert app.waking() and not app.traffic.planes and app.radar is None
+        assert "AWAKE AFTER 1H 00M" in app.gif_msg
+        await wait_for(pilot, lambda: len(app.traffic.planes) == len(AIRCRAFT) and app.radar is not None)
+        assert env.aircraft_calls                  # fetched again, not drawn from before the sleep
+    run(scenario)
+
+
+def test_network_errors_right_after_waking_are_not_shown(env):
+    async def scenario(app, pilot):
+        await to_air(app, pilot)
+        app._last_tick -= 600
+        app._tick()
+        env.fail_aircraft = True
+        app._set_data(app.base, None, "HOME URLError: network is unreachable")
+        await pilot.pause(3)
+        assert app.api_error is None and not app.traffic.error
+        app.resumed_at -= app.WAKE_GRACE + 1       # later on, errors are real again
+        app._set_data(app.base, None, "HOME URLError: network is unreachable")
+        assert app.api_error
+    run(scenario)
+
+
+# --- spacecraft ----------------------------------------------------------------------------------------------------
+
+def _overhead(app):
+    """Pretend the ISS is right over home now, with a short track."""
+    from wxterm import space as S
+    lat, lon = HOME
+    craft = S.Craft(25544, "ISS", True)
+    app.sky.cand = [0]
+    app.sky.now = lambda idx, t, bbox: [(craft, lat, lon, 418.0, [(lat - 0.2, lon - 0.3), (lat, lon),
+                                                                   (lat + 0.2, lon + 0.3)])]
+
+
+def test_space_is_on_by_default_and_fetches_elements_from_the_first_collector(env):
+    async def scenario(app, pilot):
+        assert app.space_on
+        await wait_for(pilot, lambda: len(app.sky) == 1)
+        assert set(env.tle_calls) == {"stations", "visual", "starlink"}
+        await wait_for(pilot, lambda: app.space_passes is not None)
+        assert "[O] SPACE ON" in text(app) and " SPACE " in text(app).split("\n")[0]
+    run(scenario)
+
+
+def test_a_station_over_the_map_is_drawn_and_named_in_the_border(env):
+    async def scenario(app, pilot):
+        await wait_for(pilot, lambda: len(app.sky) == 1)
+        _overhead(app)
+        app._refresh_map()
+        await pilot.pause(0.6)
+        s = text(app)
+        # the town is just right of the station, so the label goes left and both stay readable
+        assert "ISS 418 KM" in s and "◆ TESTVILLE" in s and "ISS OVER THE MAP" in s.split("\n")[0]
+    run(scenario)
+
+
+def test_o_turns_the_space_layer_off_and_saves_it(env):
+    async def scenario(app, pilot):
+        await wait_for(pilot, lambda: len(app.sky) == 1)
+        _overhead(app)
+        await pilot.press("o")
+        assert app.space_on is False and saved(env)["space"] is False
+        await pilot.pause(0.6)
+        s = text(app)
+        assert "◆" not in s and "[O] SPACE OFF" in s
+    run(scenario)
+
+
+def test_the_passes_panel(env):
+    from wxterm import space as S
+
+    async def scenario(app, pilot):
+        await wait_for(pilot, lambda: app.space_passes is not None)
+        t0 = time.time() + 3600
+        app.space_passes = [S.Pass("ISS", t0, t0 + 300, t0 + 600, 62.0, "SW", "NE", True),
+                            S.Pass("TIANGONG", t0 + 9000, t0 + 9200, t0 + 9400, 18.0, "W", "S", False)]
+        app.space_next = ("ISS", time.time() + 2 * 86400)
+        slots = [k for k, _ in app.query_one("#extras").available(app)]
+        app.extras_idx = slots.index("passes")
+        app.query_one("#extras").refresh()
+        await pilot.pause(0.4)
+        s = text(app, "#extras")
+        assert "VISIBLE FROM TESTVILLE" in s and "ISS" in s and "62°" in s and "SW → NE" in s and "10 MIN" in s
+        assert "TIANGONG" not in s.split("NEXT OVER")[0]           # not visible: not listed
+        assert "NEXT OVER THE MAP: ISS" in s
     run(scenario)

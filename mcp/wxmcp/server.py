@@ -28,7 +28,7 @@ from . import system, weather
 from .weather import STATE_DIR, WxError
 
 log = logging.getLogger("wxmcp")
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 PORT = int(os.environ.get("WXMCP_PORT", "8090"))
 RATE_PER_MIN = int(os.environ.get("WXMCP_RATE_PER_MIN", "120"))
 SHOT_GAP_S = 3.0
@@ -129,7 +129,7 @@ async def get_status() -> dict:
             "digit_style": st.get("bigfont"), "terminal_cells": st.get("cells"), "layout": st.get("layout"),
             "radar_paused": st.get("radar_paused"), "recording_gif": st.get("recording_gif"),
             "map_layers": st.get("layers"), "map_range_nm": st.get("range_nm"),
-            "air_traffic": st.get("air"),
+            "air_traffic": st.get("air"), "spacecraft": st.get("space"),
             "burn_in_shuffle_min": st.get("shuffle_min"), "data_error": st.get("data_error"),
             "uptime_hours": round((time.time() - st["started"]) / 3600, 1) if st.get("started") else None,
         }

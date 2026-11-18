@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 (2026-11-17)
+
+- **Spacecraft layer** (`o`, on by default, `SPACE` in `kiosk.conf`): the space stations, the brightest satellites and
+  Starlink cross the map with their names, altitudes and ground tracks. The top border counts down to the next station
+  overhead, and the rotating panel lists the stations' visible passes. Orbits from CelesTrak, fetched by one collector
+  at most every 6 hours; positions computed locally with SGP4.
+- **Suspend on lid close** (`LID=suspend` in `kiosk.conf`): the laptop sleeps when the lid closes and wakes when it
+  opens. On waking the display drops old aircraft and radar and refreshes everything, and the collectors catch up.
+- `scripts/wxctl.sh space on|off`. The MCP server's `get_status` reports the space layer.
+
 ## 1.2.0 (2026-11-17)
 
 - **Air traffic**, contributed by [Justin Van Bibber](https://github.com/notjvb) (thanks, Justin): live ADS-B aircraft from adsb.fi (adsb.lol as a fallback) with
